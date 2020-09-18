@@ -1,0 +1,93 @@
+times := 3
+	begin := time.Now().Unix()
+
+	/*
+		node.StartLoop()
+
+		chs := make([]chan bool, times)
+		for i := 0; i < times; i++ {
+			chs[i] = make(chan bool)
+			oid := "test-id-" + strconv.Itoa(i)
+			go func(oid string, ch chan bool) {
+				node.Put(oid, "image/jpg", body, ch)
+			}(oid, chs[i])
+		}
+
+		for _, ch := range chs {
+			common.Log.Info("put result", <-ch)
+		}
+	*/
+
+	var wg sync.WaitGroup
+	wg.Add(times)
+
+	for i := 0; i < times; i++ {
+		go func(wg *sync.WaitGroup, j int) {
+			defer wg.Done()
+
+			oid := "test-id-" + strconv.Itoa(j)
+			error = node.Save(oid, "image/jpg", body, true)
+			if error != nil {
+				common.Log.Info("put failed", oid, error)
+				return
+			}
+		}(&wg, i)
+	}
+	wg.Wait()
+
+	common.Log.Info("all save cost - ", time.Now().Unix()-begin)
+
+	/*
+		for i := 0; i < times; i++ {
+			oid := "test-id-" + strconv.Itoa(i)
+			_, ok := node.Client.Tree.Get("/oid-meta/" + oid)
+			if ok {
+				//common.Log.Info("tree node for ", oid, v)
+			} else {
+				common.Log.Info("fail to get tree node info", oid)
+			}
+		}
+	*/
+
+	// should get from config center
+	oidGet := "test-id-1"
+	var ff agent.Ff
+	error = node.Client.Get("/oid-meta/"+oidGet, &ff)
+	if error != nil {
+		common.Log.Info("get oid meta data failed", error)
+		return
+	}
+	common.Log.Info("oid meta data", ff)
+
+	bodyGet, errorGet := node.Get(ff)
+	if errorGet != nil {
+		common.Log.Info("get failed", errorGet)
+		return
+	} else {
+		common.Log.Info("get result", len(bodyGet))
+	}
+	
+	
+	// 用队列的形式，用单个goroutine去write
+/*
+func (this *Node) StartLoop() {
+	this.Ch = make(chan One2Saved)
+
+	go func() {
+		for {
+			one := <-this.Ch
+			error := this.Save(one.oid, one.mime, one.body, false)
+			if error != nil {
+				common.Log.Info("save file failed", error)
+				one.ch <- false
+			} else {
+				one.ch <- true
+			}
+		}
+	}()
+}
+
+func (this *Node) Put(oid string, mime string, body []byte, ch chan bool) {
+	this.Ch <- One2Saved{oid: oid, mime: mime, body: body, ch: ch}
+}
+*/
