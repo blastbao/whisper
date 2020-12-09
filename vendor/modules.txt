@@ -1,0 +1,6 @@
+# github.com/alecthomas/binary v0.0.0-20190922233330-fb1b1d9c299c
+github.com/alecthomas/binary
+# github.com/cznic/b v0.0.0-20181122101859-a26611c4d92d
+github.com/cznic/b
+# github.com/valyala/gorpc v0.0.0-20160519171614-908281bef774
+github.com/valyala/gorpc
