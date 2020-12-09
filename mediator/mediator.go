@@ -19,40 +19,40 @@ type Mediator struct {
 	// 10 hosts ~= 6,500,000 blocks, this is BlockTree length
 }
 
-func (this *Mediator) Start(host, dir string) {
-	this.Dir = dir
-	this.BlockTree = b.TreeNew(common.CmpInt)
-	this.mutex = new(sync.Mutex)
+func (m *Mediator) Start(host, dir string) {
+	m.Dir = dir
+	m.BlockTree = b.TreeNew(common.CmpInt)
+	m.mutex = new(sync.Mutex)
 
-	this.Server = &NetServer{}
-	if e := this.Server.Start(host, common.SERVER_PORT_MEDIATOR); e != nil {
+	m.Server = &NetServer{}
+	if e := m.Server.Start(host, common.SERVER_PORT_MEDIATOR); e != nil {
 		common.Log.Error("mediator server start error", e)
 	} else {
 
 	}
 }
 
-func (this *Mediator) Close() {
-	if this.Server != nil {
-		this.Server.Close()
+func (m *Mediator) Close() {
+	if m.Server != nil {
+		m.Server.Close()
 	}
 }
 
-func (this *Mediator) getPersistFile() string {
-	return this.Dir + "/mediator.data"
+func (m *Mediator) getPersistFile() string {
+	return m.Dir + "/mediator.data"
 }
 
 // write to file
-func (this *Mediator) Persist() (err error) {
-	this.mutex.Lock()
-	defer this.mutex.Unlock()
+func (m *Mediator) Persist() (err error) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 
-	if this.BlockTree.Len() == 0 {
-		fn := this.getPersistFile()
+	if m.BlockTree.Len() == 0 {
+		fn := m.getPersistFile()
 		return os.Remove(fn)
 	}
 
-	en, e := this.BlockTree.SeekFirst()
+	en, e := m.BlockTree.SeekFirst()
 	if e != nil {
 		err = e
 		return
@@ -84,7 +84,7 @@ func (this *Mediator) Persist() (err error) {
 
 	bb := buf.Bytes()
 	if len(bb) > 0 {
-		e = common.Write2File(bb, this.getPersistFile(), os.O_WRONLY)
+		e = common.Write2File(bb, m.getPersistFile(), os.O_WRONLY)
 		if e != nil {
 			err = e
 			return
@@ -94,11 +94,11 @@ func (this *Mediator) Persist() (err error) {
 	return nil
 }
 
-func (this *Mediator) Load() (err error) {
-	this.mutex.Lock()
-	defer this.mutex.Unlock()
+func (m *Mediator) Load() (err error) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 
-	fn := this.getPersistFile()
+	fn := m.getPersistFile()
 	bb, e := ioutil.ReadFile(fn)
 	if e != nil {
 		common.Log.Error("mediator load error but skip", fn, e)
@@ -113,20 +113,20 @@ func (this *Mediator) Load() (err error) {
 		var block Block
 		common.Dec(b, &block)
 
-		this.BlockTree.Set(block.BlockId, block)
+		m.BlockTree.Set(block.BlockId, block)
 	}
 
-	common.Log.Info("mediator loaded block number", this.BlockTree.Len())
+	common.Log.Info("mediator loaded block number", m.BlockTree.Len())
 	return nil
 }
 
-func (this *Mediator) NewBlock(dataId int, addr string, dir string, size int) (blockId int, err error) {
-	this.mutex.Lock()
-	defer this.mutex.Unlock()
+func (m *Mediator) NewBlock(dataId int, addr string, dir string, size int) (blockId int, err error) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 
 	blockIdMax := 0
-	if this.BlockTree.Len() != 0 {
-		en, e := this.BlockTree.SeekFirst()
+	if m.BlockTree.Len() != 0 {
+		en, e := m.BlockTree.SeekFirst()
 		if e != nil {
 			err = e
 			return
@@ -153,7 +153,7 @@ func (this *Mediator) NewBlock(dataId int, addr string, dir string, size int) (b
 	newBlockId := blockIdMax + 1
 
 	block := Block{BlockId: newBlockId, DataId: dataId, Addr: addr, Dir: dir, Size: size}
-	this.BlockTree.Set(newBlockId, block)
+	m.BlockTree.Set(newBlockId, block)
 
 	return newBlockId, nil
 }

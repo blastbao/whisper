@@ -26,14 +26,19 @@ type NodeServer struct {
 	node *Node
 }
 
-func (this *NodeServer) handler(clientAddr string, request interface{}) interface{} {
+
+
+//
+func (ns *NodeServer) handler(clientAddr string, request interface{}) interface{} {
+
+
 	pack := request.(center.PackRecord)
 	packReturn := center.PackRecord{}
 
 	if AGENT_SERVER_COMMAND_SAVE == pack.Command {
 		rec := pack.Rec
 
-		recSaved, e := this.node.SaveLocal(rec.Oid, pack.Body)
+		recSaved, e := ns.node.SaveLocal(rec.Oid, pack.Body)
 		if e != nil {
 			packReturn.Flag = false
 			packReturn.Msg = "node server save local error - " + e.Error()
@@ -44,10 +49,10 @@ func (this *NodeServer) handler(clientAddr string, request interface{}) interfac
 		recSaved.Mime = rec.Mime
 
 		packReq := center.PackRecord{Command: center.CMD_PUT_RECORD, Rec: recSaved}
-		_, e = this.c.Call(packReq)
+		_, e = ns.c.Call(packReq)
 		if e != nil {
 			// reset local, monitor check is better
-			//this.Node.ResetLocal(recSaved)
+			//ns.Node.ResetLocal(recSaved)
 
 			packReturn.Flag = false
 			packReturn.Msg = "node server put rec error - " + e.Error()
@@ -57,7 +62,7 @@ func (this *NodeServer) handler(clientAddr string, request interface{}) interfac
 		packReturn.Flag = true
 	} else if AGENT_SERVER_COMMAND_GET == pack.Command {
 		rec := pack.Rec
-		body, error := this.node.Get(rec)
+		body, error := ns.node.Get(rec)
 		if error != nil {
 			packReturn.Flag = false
 			packReturn.Msg = error.Error()
@@ -67,7 +72,7 @@ func (this *NodeServer) handler(clientAddr string, request interface{}) interfac
 		packReturn.Body = body
 		packReturn.Flag = true
 	} else if AGENT_SERVER_COMMAND_CLOSE == pack.Command {
-		this.s.Stop()
+		ns.s.Stop()
 	} else {
 		packReturn.Flag = false
 		packReturn.Msg = "command found match - save/get/close"
@@ -78,28 +83,28 @@ func (this *NodeServer) handler(clientAddr string, request interface{}) interfac
 	return packReturn
 }
 
-func (this *NodeServer) Start(mediatorHost, nodeHost string) {
+func (ns *NodeServer) Start(mediatorHost, nodeHost string) {
 	rec := center.Record{BlockId: 0}
 	gob.Register(center.PackRecord{Command: "", Body: []byte{0}, Rec: rec, Msg: "", Flag: false})
 
-	this.node = &Node{}
+	ns.node = &Node{}
 
 	addr := nodeHost + ":" + strconv.Itoa(common.SERVER_PORT_AGENT)
-	this.s = gorpc.NewTCPServer(addr, this.handler)
-	if e := this.s.Start(); e != nil {
+	ns.s = gorpc.NewTCPServer(addr, ns.handler)
+	if e := ns.s.Start(); e != nil {
 		common.Log.Error("node server started failed", e)
 		return
 	} else {
 		common.Log.Info("node server started - " + addr)
 	}
 
-	this.LetMediate(mediatorHost)
+	ns.LetMediate(mediatorHost)
 }
 
-func (this *NodeServer) LetMediate(mediatorHost string) {
-	this.mc = &mediator.NetClient{}
+func (ns *NodeServer) LetMediate(mediatorHost string) {
+	ns.mc = &mediator.NetClient{}
 
-	if e := this.mc.Start(mediatorHost + ":" + strconv.Itoa(common.SERVER_PORT_MEDIATOR)); e != nil {
+	if e := ns.mc.Start(mediatorHost + ":" + strconv.Itoa(common.SERVER_PORT_MEDIATOR)); e != nil {
 		common.Log.Error("node server mediator client started failed", e)
 		return
 	} else {
@@ -107,25 +112,25 @@ func (this *NodeServer) LetMediate(mediatorHost string) {
 	}
 
 	// connect to center server
-	this.mc.Watch("node-server-connect-to-center", func(value, valueOld []byte) {
+	ns.mc.Watch("node-server-connect-to-center", func(value, valueOld []byte) {
 		centerServerAddr := string(value)
 		common.Log.Info("node server center addr is " + centerServerAddr)
 
-		if this.c != nil {
-			common.Log.Info("node server center client is already connected - " + this.c.Addr)
-			if this.c.Addr == centerServerAddr {
+		if ns.c != nil {
+			common.Log.Info("node server center client is already connected - " + ns.c.Addr)
+			if ns.c.Addr == centerServerAddr {
 				return
 			}
 
 			common.Log.Info("node server center client is stopping")
-			this.c.Stop()
+			ns.c.Stop()
 		}
 
-		this.ConnectToCenter(centerServerAddr)
+		ns.ConnectToCenter(centerServerAddr)
 	})
 
 	// refresh latest block info
-	this.mc.Watch("node-server-block-refresh", func(value, valueOld []byte) {
+	ns.mc.Watch("node-server-block-refresh", func(value, valueOld []byte) {
 		arr := bytes.Split(value, common.SP)
 
 		blocks := list.New()
@@ -146,27 +151,27 @@ func (this *NodeServer) LetMediate(mediatorHost string) {
 			blocks.PushBack(blockWrapper)
 		}
 
-		this.node.Blocks = blocks
+		ns.node.Blocks = blocks
 	})
 }
 
-func (this *NodeServer) ConnectToCenter(addr string) {
-	this.c = gorpc.NewTCPClient(addr)
-	this.c.Start()
+func (ns *NodeServer) ConnectToCenter(addr string) {
+	ns.c = gorpc.NewTCPClient(addr)
+	ns.c.Start()
 	common.Log.Info("node server center client connected")
 }
 
-func (this *NodeServer) Close() {
-	if this.s != nil {
+func (ns *NodeServer) Close() {
+	if ns.s != nil {
 		common.Log.Info("node server stoped")
-		this.s.Stop()
+		ns.s.Stop()
 	}
-	if this.c != nil {
+	if ns.c != nil {
 		common.Log.Info("node server center client stoped")
-		this.c.Stop()
+		ns.c.Stop()
 	}
-	if this.mc != nil {
+	if ns.mc != nil {
 		common.Log.Info("node server mediator client stoped")
-		this.mc.Close()
+		ns.mc.Close()
 	}
 }

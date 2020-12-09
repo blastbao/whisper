@@ -26,33 +26,33 @@ func NewBufferWriter(fn string, bufferSize int) *BufferWriter {
 	return r
 }
 
-func (this *BufferWriter) Flush() (err error) {
-	this.mutex.Lock()
-	defer this.mutex.Unlock()
+func (bw *BufferWriter) Flush() (err error) {
+	bw.mutex.Lock()
+	defer bw.mutex.Unlock()
 
-	e := Write2File(this.bb.Bytes(), this.fn, os.O_APPEND)
+	e := Write2File(bw.bb.Bytes(), bw.fn, os.O_APPEND)
 	if e != nil {
 		err = e
 		return
 	}
 
-	this.count = 0
-	this.bb.Reset()
+	bw.count = 0
+	bw.bb.Reset()
 
 	return
 }
 
-func (this *BufferWriter) Write(msg string) (err error) {
-	_, e := this.bb.WriteString(msg)
+func (bw *BufferWriter) Write(msg string) (err error) {
+	_, e := bw.bb.WriteString(msg)
 	if e != nil {
 		err = e
 		return
 	}
-	this.count++
-	this.bb.WriteByte('\n')
+	bw.count++
+	bw.bb.WriteByte('\n')
 
-	if this.count >= this.bufferSize {
-		return this.Flush()
+	if bw.count >= bw.bufferSize {
+		return bw.Flush()
 	}
 
 	return

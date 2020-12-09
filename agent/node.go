@@ -8,10 +8,9 @@ import (
 	"sync"
 	"time"
 
-
-	"github.com/blastbao/whisper/mediator"
 	"github.com/blastbao/whisper/center"
 	"github.com/blastbao/whisper/common"
+	"github.com/blastbao/whisper/mediator"
 )
 
 const (
@@ -20,14 +19,15 @@ const (
 	GET_BLOCK_LOCK_PAUSE     = 1e6
 )
 
+
 type BlockInServer struct {
 	mediator.Block
 	mutex     *sync.Mutex // write lock
 	isWriting bool
 }
 
-func (this *BlockInServer) GetFilePath() string {
-	return this.Dir + "/" + BLOCK_FILE_NAME_PRE + strconv.Itoa(this.BlockId)
+func (bs *BlockInServer) GetFilePath() string {
+	return bs.Dir + "/" + BLOCK_FILE_NAME_PRE + strconv.Itoa(bs.BlockId)
 }
 
 // store/read files from disk
@@ -39,12 +39,12 @@ type Node struct {
 }
 
 // get one block to store, dir(mounted disk) should be different 4 copies
-func (this *Node) getFitBlock(oid string, len int, beginLoop int) *BlockInServer {
+func (n *Node) getFitBlock(oid string, len int, beginLoop int) *BlockInServer {
 	if beginLoop > GET_BLOCK_MAX_LOOP_TIMES {
 		return nil
 	}
 	needLoopAgain := false
-	for e := this.Blocks.Front(); e != nil; e = e.Next() {
+	for e := n.Blocks.Front(); e != nil; e = e.Next() {
 		block := e.Value.(*BlockInServer)
 		left := block.Size - block.End
 		if left < len {
@@ -54,7 +54,7 @@ func (this *Node) getFitBlock(oid string, len int, beginLoop int) *BlockInServer
 		if !block.isWriting {
 			return block
 		} else {
-			// if this block is writing data, sleep and loop again
+			// if n block is writing data, sleep and loop again
 			needLoopAgain = true
 		}
 	}
@@ -62,13 +62,13 @@ func (this *Node) getFitBlock(oid string, len int, beginLoop int) *BlockInServer
 	if needLoopAgain {
 		common.Log.Info("node find block loop again", beginLoop+1)
 		time.Sleep(GET_BLOCK_LOCK_PAUSE)
-		return this.getFitBlock(oid, len, beginLoop+1)
+		return n.getFitBlock(oid, len, beginLoop+1)
 	}
 	return nil
 }
 
-func (this *Node) getBlock(blockId int) (b *BlockInServer, err error) {
-	for e := this.Blocks.Front(); e != nil; e = e.Next() {
+func (n *Node) getBlock(blockId int) (b *BlockInServer, err error) {
+	for e := n.Blocks.Front(); e != nil; e = e.Next() {
 		block := e.Value.(*BlockInServer)
 		if block.BlockId == blockId {
 			return block, nil
@@ -77,8 +77,8 @@ func (this *Node) getBlock(blockId int) (b *BlockInServer, err error) {
 	return nil, errors.New("node error as block not found")
 }
 
-func (this *Node) Get(rec center.Record) (b []byte, err error) {
-	block, error := this.getBlock(rec.BlockId)
+func (n *Node) Get(rec center.Record) (b []byte, err error) {
+	block, error := n.getBlock(rec.BlockId)
 	if error != nil {
 		err = error
 		return
@@ -111,9 +111,9 @@ func (this *Node) Get(rec center.Record) (b []byte, err error) {
 	return bb, nil
 }
 
-func (this *Node) SaveLocal(oid string, b []byte) (rec center.Record, err error) {
+func (n *Node) SaveLocal(oid string, b []byte) (rec center.Record, err error) {
 	var len int = len(b)
-	block := this.getFitBlock(oid, len, 0)
+	block := n.getFitBlock(oid, len, 0)
 	if block == nil {
 		err = errors.New("node save error as no block space left")
 		return
@@ -164,8 +164,8 @@ func (this *Node) SaveLocal(oid string, b []byte) (rec center.Record, err error)
 }
 
 // read full 4 copy, need lock first
-func (this *Node) LockBlock(blockId int) {
-	block, e := this.getBlock(blockId)
+func (n *Node) LockBlock(blockId int) {
+	block, e := n.getBlock(blockId)
 	if e != nil {
 		common.Log.Error("node lock block error as block not found - " + strconv.Itoa(blockId))
 		return
@@ -175,8 +175,8 @@ func (this *Node) LockBlock(blockId int) {
 	block.mutex.Lock()
 }
 
-func (this *Node) UnlockBlock(blockId int) {
-	block, e := this.getBlock(blockId)
+func (n *Node) UnlockBlock(blockId int) {
+	block, e := n.getBlock(blockId)
 	if e != nil {
 		common.Log.Error("node lock block error as block not found - " + strconv.Itoa(blockId))
 		return
@@ -186,8 +186,8 @@ func (this *Node) UnlockBlock(blockId int) {
 	block.isWriting = false
 }
 
-func (this *Node) ReadFull(blockId int) (b []byte, err error) {
-	block, e := this.getBlock(blockId)
+func (n *Node) ReadFull(blockId int) (b []byte, err error) {
+	block, e := n.getBlock(blockId)
 	if e != nil {
 		err = e
 		return

@@ -21,7 +21,7 @@ type Record struct {
 	Oid     string
 	BlockId int
 	Md5     []byte
-	Offset  int
+	Offset  int		//
 	Len     int
 	Mime    int
 	Created int64
@@ -31,14 +31,19 @@ type Record struct {
 
 var r = rand.New(rand.NewSource(time.Now().UnixNano()))
 
+// dataId_copyNum_RandInt_RandInt_0
 func GenOid(dataId, copyNum int) string {
 	return GenOidNoSuffix(dataId, copyNum) + "_0"
 }
 
+// dataId_copyNum_RandInt_RandInt
 func GenOidNoSuffix(dataId, copyNum int) string {
-	return strconv.Itoa(dataId) + "_" + strconv.Itoa(copyNum) + "_" + strconv.Itoa(r.Intn(100000)) +
-		"_" + strconv.Itoa(r.Intn(100000))
+	return strconv.Itoa(dataId) + "_" +
+		   strconv.Itoa(copyNum) + "_" +
+		   strconv.Itoa(r.Intn(100000)) + "_" +
+		   strconv.Itoa(r.Intn(100000))
 }
+
 
 func GetOidInfo(oid string) OidInfo {
 	arr := strings.Split(oid, "_")
@@ -108,13 +113,14 @@ func ConvIndexTo(rec Record) (body []byte, err error) {
 type RecordList []Record
 
 // implements sort interface
-func (this RecordList) Len() int {
-	return len(this)
+func (rs RecordList) Len() int {
+	return len(rs)
 }
 
-func (this RecordList) Less(i, j int) bool {
-	b1 := this[i]
-	b2 := this[j]
+// 按照 BlockId、Offset 排序
+func (rs RecordList) Less(i, j int) bool {
+	b1 := rs[i]
+	b2 := rs[j]
 
 	if b1.BlockId != b2.BlockId {
 		return b1.BlockId < b2.BlockId
@@ -123,19 +129,18 @@ func (this RecordList) Less(i, j int) bool {
 	return b1.Offset < b2.Offset
 }
 
-func (this RecordList) Swap(i, j int) {
-	var temp Record = this[i]
-	this[i] = this[j]
-	this[j] = temp
+func (rs RecordList) Swap(i, j int) {
+	temp := rs[i]
+	rs[i] = rs[j]
+	rs[j] = temp
 }
 
-func (this RecordList) FilterByStatus(status int) RecordList {
-	r := []Record{}
-
-	for _, rec := range this {
+func (rs RecordList) FilterByStatus(status int) RecordList {
+	var res RecordList
+	for _, rec := range rs {
 		if rec.Status == status {
-			r = append(r, rec)
+			res = append(rs, rec)
 		}
 	}
-	return r
+	return res
 }

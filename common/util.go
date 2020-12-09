@@ -76,6 +76,7 @@ func CmpStr(a, b interface{}) int {
 	return 0
 }
 
+// 检查 slice 中是否包含 item
 func ContainsStr(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {

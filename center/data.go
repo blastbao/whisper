@@ -2,9 +2,7 @@ package center
 
 import (
 	"bytes"
-	"github.com/blastbao/whisper/common"
 	"errors"
-	"github.com/cznic/b"
 	"io"
 	"io/ioutil"
 	"os"
@@ -14,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/blastbao/whisper/common"
+	"github.com/cznic/b"
 )
 
 const (
@@ -26,71 +27,90 @@ const (
 )
 
 // main data structure
-type Data struct {
+type Index struct {
+	// index id
 	Id               int
+	// 存储目录
 	Dir              string
+	// oid => rec
 	IndexTree        *b.Tree // key is oid, value is Index
+	// Md5 => oid
 	OidMd5Tree       *b.Tree // key is md5, value is oid
+	// CTime => oid
 	OidCreatedTree   *b.Tree // key is created time, value is oid
+	// MTime
 	LastModifyMillis time.Time
 	mutex            *sync.Mutex
 }
 
-func (this *Data) Init(id int, dir string) error {
-	this.Id = id
-	this.Dir = dir
-	this.mutex = new(sync.Mutex)
+func (index *Index) Init(id int, dir string) error {
+	index.Id = id
+	index.Dir = dir
+	index.mutex = new(sync.Mutex)
 
-	return this.generateLogFile()
+	return index.generateLogFile()
 }
 
-func (this *Data) generateLogFile() error {
-	fn := this.getWriteLogFile()
-	fi, error := os.Stat(fn)
+
+// 创建日志文件
+func (index *Index) generateLogFile() error {
+
+	fd := index.getWriteLogFile()
+	fi, error := os.Stat(fd)
+
 	isExists := error == nil || os.IsExist(error)
 
+	// 不存在则创建，并更新修改时间
 	if !isExists {
-		file, error := os.Create(fn)
+		file, error := os.Create(fd)
 		if error != nil {
 			return error
 		}
-
-		this.LastModifyMillis = time.Now()
 		defer file.Close()
+		index.LastModifyMillis = time.Now()
+	// 存在则获取修改时间
 	} else {
-		this.LastModifyMillis = fi.ModTime()
+		index.LastModifyMillis = fi.ModTime()
 	}
-
 	return nil
 }
 
-func (this *Data) getPersistFile() string {
-	return this.Dir + "/" + INDEX_FILE_PRE + strconv.Itoa(this.Id)
+// dir/index_{dataId}
+func (index *Index) getPersistFile() string {
+	return index.Dir + "/" + INDEX_FILE_PRE + strconv.Itoa(index.Id)
 }
 
-func (this *Data) getWriteLogFile() string {
-	return this.Dir + "/" + INDEX_LOG_FILE_PRE + strconv.Itoa(this.Id)
+// dir/index_log_{dataId}
+func (index *Index) getWriteLogFile() string {
+	return index.Dir + "/" + INDEX_LOG_FILE_PRE + strconv.Itoa(index.Id)
 }
 
-func (this *Data) loadEachSync(fn string, indexTree, oidMd5Tree, oidCreatedTree *b.Tree) error {
-	_, e := os.Stat(fn)
+// 加载索引文件
+func (index *Index) loadEachSync(fileName string, indexTree, oidMd5Tree, oidCreatedTree *b.Tree) error {
+
+	_, e := os.Stat(fileName)
 	isExists := e == nil || os.IsExist(e)
 
+	// 若索引文件不存在，打印日志。
 	if !isExists {
-		common.Log.Info("center data no index file to load", this.Id, fn)
+		common.Log.Info("center index no index file to load", index.Id, fileName)
 	} else {
-		common.Log.Info("center data begin to load index file", this.Id, fn)
-		bb, e := ioutil.ReadFile(fn)
+		common.Log.Info("center index begin to load index file", index.Id, fileName)
+
+		// 读取索引文件
+		content, e := ioutil.ReadFile(fileName)
 		if e != nil {
 			return e
 		}
 
-		bbDepressed, e := common.Depress(bb)
+		// 解压缩
+		raw, e := common.Depress(content)
 		if e != nil {
 			return e
 		}
 
-		e = this.appendIndexFromBytes(bbDepressed, indexTree, oidMd5Tree, oidCreatedTree)
+		// 将索引数据同步到索引中
+		e = index.appendIndexFromBytes(raw, indexTree, oidMd5Tree, oidCreatedTree)
 		if e != nil {
 			return e
 		}
@@ -99,290 +119,346 @@ func (this *Data) loadEachSync(fn string, indexTree, oidMd5Tree, oidCreatedTree 
 	return nil
 }
 
-func (this *Data) Load() (err error) {
-	if this.Id == 0 {
-		err = errors.New("center data load error as no id given")
-		return
-	}
-	this.mutex.Lock()
-	defer this.mutex.Unlock()
+func (index *Index) Load() error {
 
+	if index.Id == 0 {
+		return errors.New("center index load error as no id given")
+	}
+
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
+
+	// 创建三个索引结果
 	indexTree := b.TreeNew(common.CmpStr)
 	oidMd5Tree := b.TreeNew(common.CmpByte)
 	oidCreatedTree := b.TreeNew(common.CmpInt64)
 
-	rawPersistFilePath := INDEX_FILE_PRE + strconv.Itoa(this.Id)
+	// 原始索引文件：index_{dataID}
+	rawPersistFilePath := INDEX_FILE_PRE + strconv.Itoa(index.Id)
+
+	// 原始索引文件：index_{dataID}_part{xxx}
 	exp := rawPersistFilePath + "_part\\d+$"
+
+	// 正则表达式
 	reg := regexp.MustCompile(exp)
 
+	// 遍历 index.Dir ，获取其中所有 "以 index_{dataID} 为后缀" 或者 "匹配 index_{dataID}_part{xxx} 模式" 的索引文件
 	files := make([]string, 1, 1)
-	e := filepath.Walk(this.Dir, func(path string, info os.FileInfo, err error) error {
-		if strings.HasSuffix(path, rawPersistFilePath) || reg.MatchString(path) {
-			files = append(files, path)
-		}
+	if err := filepath.Walk(
+		index.Dir,
+		func(path string, info os.FileInfo, e error) error {
+			if strings.HasSuffix(path, rawPersistFilePath) || reg.MatchString(path) {
+				files = append(files, path)
+			}
+			return e
+		},
+	); err != nil {
 		return err
-	})
-	if e != nil {
-		err = e
-		return
 	}
 
-	common.Log.Info("center data load from files", files)
-	fileNum := len(files)
+	common.Log.Info("center index load from files", files)
 
-	for i := 1; i < fileNum; i++ {
-		e = this.loadEachSync(files[i], indexTree, oidMd5Tree, oidCreatedTree)
-		if e != nil {
-			common.Log.Info("center data load part error", files[i], e)
-			err = e
-			return
-		} else {
-			common.Log.Info("center data load part ok", files[i])
+	// 逐个文件进行加载
+	for _, file := range files {
+		//
+		if err := index.loadEachSync(file, indexTree, oidMd5Tree, oidCreatedTree); err != nil {
+			common.Log.Info("center index load part error", file, err)
+			return err
 		}
+		common.Log.Info("center index load part ok", file)
 	}
 
 	// read from log
-	e = this.appendIndexFromLogFile(indexTree, oidMd5Tree, oidCreatedTree)
-	if e != nil {
-		err = e
-		return
+	if err := index.appendIndexFromLogFile(indexTree, oidMd5Tree, oidCreatedTree); err != nil {
+		return err
 	}
 
-	this.IndexTree = indexTree
-	this.OidMd5Tree = oidMd5Tree
-	this.OidCreatedTree = oidCreatedTree
+	index.IndexTree = indexTree
+	index.OidMd5Tree = oidMd5Tree
+	index.OidCreatedTree = oidCreatedTree
 
 	return nil
 }
 
-func (this *Data) appendIndexFromLogFile(indexTree, oidMd5Tree, oidCreatedTree *b.Tree) (err error) {
-	fn := this.getWriteLogFile()
-	common.Log.Info("center data begin get from log " + fn)
-	_, error := os.Stat(fn)
-	isExists := error == nil || os.IsExist(error)
+func (index *Index) appendIndexFromLogFile(indexTree, oidMd5Tree, oidCreatedTree *b.Tree) error {
+
+	// 读取日志文件
+	fn := index.getWriteLogFile()
+	common.Log.Info("center index begin get from log " + fn)
+
+	// 不存在直接返回
+	_, err := os.Stat(fn)
+	isExists := err == nil || os.IsExist(err)
 	if !isExists {
-		return
+		return nil
 	}
 
-	bb, error := ioutil.ReadFile(fn)
-	if error != nil {
-		err = error
-		return
+	// 读取日志文件内容
+	bb, err := ioutil.ReadFile(fn)
+	if err != nil {
+		return err
 	}
 
-	return this.appendIndexFromBytes(bb, indexTree, oidMd5Tree, oidCreatedTree)
+	// 将日志数据 bb 同步到索引中
+	return index.appendIndexFromBytes(bb, indexTree, oidMd5Tree, oidCreatedTree)
 }
 
-func (this *Data) appendIndexFromBytes(bb []byte, indexTree, oidMd5Tree, oidCreatedTree *b.Tree) (err error) {
-	arr := bytes.Split(bb, common.SP)
-	common.Log.Info("center data load split number", len(arr))
-	for _, recBinary := range arr {
+// 将索引数据 bb 同步到索引中
+func (index *Index) appendIndexFromBytes(bb []byte, indexTree, oidMd5Tree, oidCreatedTree *b.Tree) error {
+
+	// 按分隔符切割，得到一组索引项
+	records := bytes.Split(bb, common.SP)
+	common.Log.Info("center index load split number", len(records))
+
+	// 将 records 逐个同步到索引 indexTree/oidMd5Tree/oidCreatedTree 中
+	for _, recBinary := range records {
+
 		// 0 means it's the last one
 		if len(recBinary) == 0 {
 			continue
 		}
 
+		// 反序列化，得到 Record 对象
 		var rec Record
-		error := GetIndexFrom(recBinary, &rec)
-
-		if error != nil {
-			common.Log.Error("center data load record error", recBinary, error)
-			err = error
-			return
+		if err := GetIndexFrom(recBinary, &rec); err != nil {
+			common.Log.Error("center index load record error", recBinary, err)
+			return err
 		}
 
+		// 同步到索引
 		oid := rec.Oid
 		indexTree.Set(oid, rec)
 		oidMd5Tree.Set(rec.Md5, oid)
 		oidCreatedTree.Set(rec.Created, oid)
+
 	}
 
 	return nil
 }
 
-func (this *Data) persistEachSync(bb []byte, suf string) error {
-	fn := this.getPersistFile() + suf
-	bbCompressed, e := common.Compress(bb)
+
+func (index *Index) persistEachSync(raw []byte, part string) error {
+
+	// 文件名: dir/index_{dataId}_{part{xxx}}
+	fn := index.getPersistFile() + part
+
+	// 数据压缩
+	compressed, e := common.Compress(raw)
 	if e != nil {
 		return e
 	}
-	return common.Write2File(bbCompressed, fn, os.O_WRONLY)
+
+	// 写入文件
+	return common.Write2File(compressed, fn, os.O_WRONLY)
 }
 
 // write to file
-func (this *Data) Persist() (err error) {
-	if this.IndexTree == nil {
-		return errors.New("center data persisi error as index tree not exist")
-	}
-	this.mutex.Lock()
-	defer this.mutex.Unlock()
+//
+//
+func (index *Index) Persist() error {
 
-	en, e := this.IndexTree.SeekFirst()
+	// 主索引不存在，报错
+	if index.IndexTree == nil {
+		return errors.New("center index persist error as index tree not exist")
+	}
+
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
+
+	// 定位到首元素
+	en, e := index.IndexTree.SeekFirst()
 	if e != nil {
-		err = e
-		return
+		return e
 	}
 
 	buf := &bytes.Buffer{}
 
 	j := 0
 	fileIndex := 0
+
+	// 遍历索引元素，把所含每个 record 序列化后存储到索引文件中
 	for {
+
 		k, v, e := en.Next()
 		if e != nil {
+
 			if e != io.EOF {
-				err = e
-				return
+				return e
 			}
 
 			// last
 			arr := buf.Bytes()
 			if len(arr) > 0 {
-				common.Log.Info("center data begin persist part", this.Id, this.Dir, j)
-				e = this.persistEachSync(buf.Bytes(), "")
-				if e != nil {
-					err = e
-					return
+				common.Log.Info("center index begin persist part", index.Id, index.Dir, j)
+				// 将 buf 写入到索引文件 dir/index_{dataId} 文件中。
+				if e := index.persistEachSync(buf.Bytes(), ""); e != nil {
+					return e
 				}
 			}
 
 			break
 		}
 
+		// k,v
 		oid := k.(string)
 		rec := v.(Record)
 		rec.Oid = oid
 
+		// 序列化成二进制，binary.Marshal(rec)
 		bb, e := ConvIndexTo(rec)
 		if e != nil {
-			err = e
-			return
+			return e
 		}
 
+		// 写入数据
 		buf.Write(bb)
+
+		// 写入分隔符
 		buf.Write(common.SP)
 
+		// 判断是否要分文件
 		if (j+1)%PERSIST_EACH_FILE_RECORD_NUM_LIMIT == 0 {
-			common.Log.Info("center data begin persist part", this.Id, this.Dir, j+1)
-
-			e = this.persistEachSync(buf.Bytes(), "_part"+strconv.Itoa(fileIndex))
-			if e != nil {
-				err = e
-				return
+			common.Log.Info("center index begin persist part", index.Id, index.Dir, j+1)
+			// 存储到索引文件 dir/index_{dataId}_part{xxx} 中
+			if err := index.persistEachSync(buf.Bytes(), "_part"+strconv.Itoa(fileIndex)); err != nil {
+				return err
 			}
+			// 清空 buf
 			buf.Reset()
+			// 文件下标++
 			fileIndex++
 		}
 
+		// 数据条数++
 		j++
 	}
 
+
 	// move log file as bak
-	fn := this.getWriteLogFile()
+
+	// 将当前的日志文件 dir/index_log_{dataId} 修改为 dir/index_log_{dataId}_bak_timestamp 。
+	fn := index.getWriteLogFile()
 	_, e = os.Stat(fn)
 	isExists := e == nil || os.IsExist(e)
 	if isExists {
 		suf := "_bak_" + strconv.FormatInt(time.Now().Unix(), 10)
-		e = os.Rename(fn, fn+suf)
-
-		if e != nil {
-			err = e
-			return
+		if err := os.Rename(fn, fn+suf) ; err != nil {
+			return err
 		}
 	}
 
-	return this.generateLogFile()
+	// 生成新的日志文件
+	return index.generateLogFile()
 }
 
-func (this *Data) Set(rec Record) (err error) {
-	return this.SetBatch([]Record{rec})
+func (index *Index) Set(rec Record) (err error) {
+	return index.SetBatch([]Record{rec})
 }
 
-func (this *Data) SetWithLog(rec Record, writeLog bool) (err error) {
-	return this.SetBatchWithLog([]Record{rec}, writeLog)
+func (index *Index) SetWithLog(rec Record, writeLog bool) (err error) {
+	return index.SetBatchWithLog([]Record{rec}, writeLog)
 }
 
-func (this *Data) SetBatch(recs []Record) (err error) {
-	return this.SetBatchWithLog(recs, true)
+func (index *Index) SetBatch(recs []Record) (err error) {
+	return index.SetBatchWithLog(recs, true)
 }
 
-func (this *Data) SetBatchWithLog(recs []Record, writeLog bool) (err error) {
-	this.mutex.Lock()
-	defer this.mutex.Unlock()
+//
+func (index *Index) SetBatchWithLog(recs []Record, writeLog bool) error {
 
-	this.LastModifyMillis = time.Now()
-	if this.IndexTree == nil {
-		this.IndexTree = b.TreeNew(common.CmpStr)
-		this.OidMd5Tree = b.TreeNew(common.CmpByte)
-		this.OidCreatedTree = b.TreeNew(common.CmpInt64)
+	index.mutex.Lock()
+	defer index.mutex.Unlock()
+
+	// 更近最近修改时间
+	index.LastModifyMillis = time.Now()
+
+	// 初始化各个索引
+	if index.IndexTree == nil {
+		index.IndexTree = b.TreeNew(common.CmpStr)
+		index.OidMd5Tree = b.TreeNew(common.CmpByte)
+		index.OidCreatedTree = b.TreeNew(common.CmpInt64)
 	}
 
-	if this.IndexTree.Len() >= MAX_TREE_LEN {
-		return errors.New("data error as exceed max length")
+	// 索引规模限制
+	if index.IndexTree.Len() >= MAX_TREE_LEN {
+		return errors.New("index error as exceed max length")
 	}
 
 	// batch flush and using chan (a log system kafka etc) can improve throughput but worsen response time
+	// 批量刷新和使用管道（如 kafka 等）可以提高吞吐量，但会增加耗时。
 	if writeLog {
-		e := this.WriteLog(recs)
-		if e != nil {
-			err = e
-			return
+		// 将 recs 写入日志
+		if err := index.WriteLog(recs); err != nil {
+			return err
 		}
 	}
 
+	// 将 recs 逐个写入索引
 	for _, rec := range recs {
 		oid := rec.Oid
-		this.IndexTree.Set(oid, rec)
-		this.OidMd5Tree.Set(rec.Md5, oid)
-		this.OidCreatedTree.Set(rec.Created, oid)
+		// ID => rec
+		index.IndexTree.Set(oid, rec)
+		// Md5 => ID
+		index.OidMd5Tree.Set(rec.Md5, oid)
+		// CTime => ID
+		index.OidCreatedTree.Set(rec.Created, oid)
 	}
 
 	return nil
 }
 
-func (this *Data) WriteLog(recs []Record) error {
-	fn := this.getWriteLogFile()
+
+// 将 recs 写入日志
+func (index *Index) WriteLog(recs []Record) error {
+
+	// 获取日志文件
+	fn := index.getWriteLogFile()
 	_, error := os.Stat(fn)
 	isExists := error == nil || os.IsExist(error)
 	if !isExists {
-		return errors.New("center data log file not exists for data " + strconv.Itoa(this.Id))
+		return errors.New("center index log file not exists for index " + strconv.Itoa(index.Id))
 	}
 
+	// 追加写入
 	file, error := os.OpenFile(fn, os.O_APPEND, 0666)
 	if error != nil {
 		return error
 	}
 	defer file.Close()
 
+	// 把 recs 写入临时内存缓存
 	buf := &bytes.Buffer{}
 	for _, rec := range recs {
+		// 二进制序列化
 		body, error := ConvIndexTo(rec)
 		if error != nil {
 			return error
 		}
-
+		// 写入数据
 		buf.Write(body)
+		// 写入分隔符
 		buf.Write(common.SP)
 	}
 
+	// 写入文件
 	_, error = file.Write(buf.Bytes())
 	return error
 }
 
-func (this *Data) Get(oid string) (rec Record, err error) {
-	v, ok := this.IndexTree.Get(oid)
+// 根据 id 从 IndexTree 获取 record
+func (index *Index) Get(oid string) (rec Record, err error) {
+	v, ok := index.IndexTree.Get(oid)
 	if !ok {
-		err = errors.New("center data get but not found " + oid)
+		err = errors.New("center index get but not found " + oid)
 		return
 	}
-
 	return v.(Record), nil
 }
 
-func (this *Data) Len() int {
-	if this.IndexTree == nil {
+// 获取 IndexTree 所含 record 数目
+func (index *Index) Len() int {
+	if index.IndexTree == nil {
 		return 0
 	}
-
-	return this.IndexTree.Len()
+	return index.IndexTree.Len()
 }

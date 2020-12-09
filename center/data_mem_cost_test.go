@@ -11,8 +11,8 @@ import (
 
 var writeLog bool = false
 
-func makeData(times int, md5 []byte, ch chan<- *Data) (err error) {
-	d := &Data{}
+func makeData(times int, md5 []byte, ch chan<- *Index) (err error) {
+	d := &Index{}
 	d.Init(1, "D:/tmp/test-whisper-dir/test-mem-cost-data")
 
 	setTag, setStartTime := common.Trace("set cost")
@@ -60,9 +60,9 @@ func TestDataCostMem(t *testing.T) {
 	dataNum := 10
 	eachTimes := 10000
 
-	chs := make([]chan *Data, dataNum)
+	chs := make([]chan *Index, dataNum)
 	for i := 0; i < dataNum; i++ {
-		chs[i] = make(chan *Data, 1)
+		chs[i] = make(chan *Index, 1)
 
 		go makeData(eachTimes, md5, chs[i])
 	}

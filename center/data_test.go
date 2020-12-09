@@ -22,7 +22,7 @@ var times int = 100
 // 100w persist cost 3s if save to 10 files, load cost 8s
 
 func TestDataSet(t *testing.T) {
-	d := &Data{}
+	d := &Index{}
 	d.Init(2, "D:/tmp/test-whisper-dir/data_2")
 
 	if doSet {
@@ -55,7 +55,7 @@ func TestDataSet(t *testing.T) {
 }
 
 func TestDataLoad(t *testing.T) {
-	d := &Data{}
+	d := &Index{}
 	d.Init(2, "D:/tmp/test-whisper-dir/data_2")
 
 	if doLoad {

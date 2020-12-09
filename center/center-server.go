@@ -1,14 +1,15 @@
 package center
 
 import (
-	"github.com/blastbao/whisper/common"
 	"encoding/gob"
-	"github.com/valyala/gorpc"
-	"github.com/blastbao/whisper/mediator"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/blastbao/whisper/common"
+	"github.com/blastbao/whisper/mediator"
+	"github.com/valyala/gorpc"
 )
 
 const (
@@ -16,6 +17,7 @@ const (
 	CMD_CLOSE             = "close"
 	CMD_PUTBACK_PREFIX    = "putback-"
 	CMD_PUT_RECORD        = "save-rec"
+
 	CMD_GET_OID_META      = "get-oid-meta"
 	CMD_CHANGE_OID_STATUS = "change-oid-status"
 
@@ -42,6 +44,7 @@ type PackRecord struct {
 
 // command dispatch
 type CenterServerHandlerFn func(p PackRecord) PackRecord
+
 type CenterServerHandler struct {
 	Command string
 	Fn      CenterServerHandlerFn
@@ -52,7 +55,10 @@ type CenterServer struct {
 	IsMaster                   bool
 	Center                     *Center
 	CenterHost                 string
+
+	//
 	clientList2OtherCenter     []*gorpc.Client // connect to other center instance
+
 	s                          *gorpc.Server
 	mc                         *mediator.NetClient // to mediator
 	Handlers                   []*CenterServerHandler
@@ -63,35 +69,53 @@ type CenterServer struct {
 }
 
 // rpc main handler
-func (this *CenterServer) handler(clientAddr string, request interface{}) interface{} {
+func (cs *CenterServer) handler(clientAddr string, request interface{}) interface{} {
+
 	// from node server / client / mediator
 	p := request.(PackRecord)
 
 	// make sure other slave center server handle ok
-	if this.IsMaster && common.ContainsStr(need2SyncSlaveCmd, p.Command) {
-		for _, c := range this.clientList2OtherCenter {
-			common.Log.Info("center server sync master to slave pack", this.CenterHost, c.Addr, p)
-			resp, e := c.Call(p)
-			if e != nil {
+
+	// 如果当前为主节点，且 p.Command 在命令列表中
+	if cs.IsMaster && common.ContainsStr(need2SyncSlaveCmd, p.Command) {
+		// 逐个 rpc 调用 slave 从节点
+		for _, c := range cs.clientList2OtherCenter {
+
+			common.Log.Info("center server sync master to slave pack", cs.CenterHost, c.Addr, p)
+
+			// 调用 rpc
+			resp, err := c.Call(p)
+			if err != nil {
+				// 出错回包
 				packReturn := PackRecord{}
 				packReturn.Flag = false
-				packReturn.Msg = e.Error()
+				packReturn.Msg = err.Error()
 				return packReturn
-			} else {
-				respPack := resp.(PackRecord)
-				if !respPack.Flag {
-					return respPack
-				}
 			}
+
+			respPack := resp.(PackRecord)
+			if !respPack.Flag {
+				// 失败回包
+				return respPack
+			}
+
+			// 成功，do nothing
 		}
 	}
 
+
+	// 如果当前为主节点
+
+
+	//
 	if strings.HasPrefix(p.Command, CMD_PUTBACK_PREFIX) {
-		return this.putback(p)
+		return cs.putback(p)
 	}
 
+	//
 	var packReturn PackRecord
-	for _, h := range this.Handlers {
+	for _, h := range cs.Handlers {
+
 		if h.Command != p.Command {
 			continue
 		}
@@ -102,21 +126,28 @@ func (this *CenterServer) handler(clientAddr string, request interface{}) interf
 	}
 
 	// slave ok but master not ok
-	if this.IsMaster && !packReturn.Flag {
-		this.chPackRecordPutback <- p
+	if cs.IsMaster && !packReturn.Flag {
+		cs.chPackRecordPutback <- p
 	}
+
 	return packReturn
 }
 
 // recover, usually it's a slave, because master process failed so need slave to "rollback"
-func (this *CenterServer) putback(p PackRecord) PackRecord {
+// 恢复，通常是一个从机，因为主进程失败了，所以需要从机来 "回滚"
+func (cs *CenterServer) putback(p PackRecord) PackRecord {
+
 	r := PackRecord{}
 
 	cmdRaw := p.Command[len(CMD_PUTBACK_PREFIX):]
 	if CMD_PUT_RECORD == cmdRaw {
+
 		p.Rec.Status = common.STATUS_RECORD_DEL
+
 		oidInfo := GetOidInfo(p.Rec.Oid)
-		e := this.Center.Set(oidInfo.DataId, p.Rec)
+
+		e := cs.Center.Set(oidInfo.DataId, p.Rec)
+
 		if e != nil {
 			r.Flag = false
 			r.Msg = e.Error()
@@ -128,66 +159,70 @@ func (this *CenterServer) putback(p PackRecord) PackRecord {
 	return r
 }
 
-func (this *CenterServer) Start(mediatorHost, centerHost string) {
+func (cs *CenterServer) Start(mediatorHost, centerHost string) {
+
 	rec := Record{BlockId: 0}
+
 	gob.Register(PackRecord{Command: "", Body: []byte{0}, Rec: rec, Msg: "", Flag: false})
 
-	if this.Center == nil {
+	if cs.Center == nil {
 		common.Log.Info("start center server failed as center is nil")
 		return
 	}
-	this.mutexWriteLog4SlaveRecover = new(sync.Mutex)
+
+	cs.mutexWriteLog4SlaveRecover = new(sync.Mutex)
 
 	// if not including port, add default
 	addr := centerHost
 	if !strings.Contains(addr, ":") {
 		addr = addr + ":" + strconv.Itoa(common.SERVER_PORT_CENTER)
 	}
-	this.CenterHost = addr
 
-	this.s = gorpc.NewTCPServer(addr, this.handler)
-	if e := this.s.Start(); e != nil {
+	cs.CenterHost = addr
+
+	cs.s = gorpc.NewTCPServer(addr, cs.handler)
+	if e := cs.s.Start(); e != nil {
 		common.Log.Error("center server started failed", e)
 	} else {
 		common.Log.Info("center server started - " + addr)
 	}
 
-	this.LetMediate(mediatorHost)
+	cs.LetMediate(mediatorHost)
 }
 
-func (this *CenterServer) putback2Slave() {
-	this.isRunningPutback = true
-	this.closeWg.Add(1)
+func (cs *CenterServer) putback2Slave() {
+	cs.isRunningPutback = true
+	cs.closeWg.Add(1)
 	for {
-		pack, more := <-this.chPackRecordPutback
+		pack, more := <-cs.chPackRecordPutback
 		if more {
 			pack.Command = CMD_PUTBACK_PREFIX + pack.Command
 
-			for _, c := range this.clientList2OtherCenter {
+			for _, c := range cs.clientList2OtherCenter {
 				resp, e := c.Call(pack)
 				if e != nil {
 					common.Log.Error("center server put back 2 slave error", e, pack)
-					this.writePutbackLog(pack)
+					cs.writePutbackLog(pack)
 				} else {
 					packReturn := resp.(PackRecord)
 					if !packReturn.Flag {
 						common.Log.Error("center server put back 2 slave fail", packReturn.Msg, pack)
-						this.writePutbackLog(pack)
+						cs.writePutbackLog(pack)
 					}
 				}
 			}
 		} else {
-			this.closeWg.Done()
+			cs.closeWg.Done()
 			common.Log.Info("center server put back is stopping")
-			this.isRunningPutback = false
+			cs.isRunningPutback = false
 			break
 		}
 	}
 }
 
-func (this *CenterServer) writePutbackLog(pack PackRecord) error {
-	this.mutexWriteLog4SlaveRecover.Lock()
-	defer this.mutexWriteLog4SlaveRecover.Unlock()
+func (cs *CenterServer) writePutbackLog(pack PackRecord) error {
+	cs.mutexWriteLog4SlaveRecover.Lock()
+	defer cs.mutexWriteLog4SlaveRecover.Unlock()
 
 	fn := common.GetUserHomeFile(PUT_BACK_LOG_FILE)
 	bb, e := common.Enc(pack)
@@ -202,27 +237,28 @@ func (this *CenterServer) writePutbackLog(pack PackRecord) error {
 	return e
 }
 
-func (this *CenterServer) Close() {
-	if this.isRunningPutback && this.chPackRecordPutback != nil {
-		close(this.chPackRecordPutback)
-	}
-	this.closeWg.Wait()
+func (cs *CenterServer) Close() {
 
-	for _, c := range this.clientList2OtherCenter {
+	if cs.isRunningPutback && cs.chPackRecordPutback != nil {
+		close(cs.chPackRecordPutback)
+	}
+	cs.closeWg.Wait()
+
+	for _, c := range cs.clientList2OtherCenter {
 		common.Log.Info("center server client to other closed - " + c.Addr)
 		c.Stop()
 	}
 
-	if this.s != nil {
+	if cs.s != nil {
 		common.Log.Info("center server closed")
-		this.s.Stop()
+		cs.s.Stop()
 	}
 }
 
-func (this *CenterServer) connect2OtherCenter(addr string) {
+func (cs *CenterServer) connect2OtherCenter(addr string) {
 	c := gorpc.NewTCPClient(addr)
 	c.Start()
-	this.clientList2OtherCenter = append(this.clientList2OtherCenter, c)
+	cs.clientList2OtherCenter = append(cs.clientList2OtherCenter, c)
 
 	common.Log.Info("center server client to other server connected - " + addr)
 }
