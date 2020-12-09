@@ -10,7 +10,7 @@ import (
 )
 
 type OidInfo struct {
-	DataId  int
+	IndexId int
 	CopyNum int
 	Seq     int // copies' sequence
 }
@@ -31,20 +31,21 @@ type Record struct {
 
 var r = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-// dataId_copyNum_RandInt_RandInt_0
-func GenOid(dataId, copyNum int) string {
-	return GenOidNoSuffix(dataId, copyNum) + "_0"
+// indexId_copyNum_RandInt_RandInt_0
+func GenOid(indexId, copyNum int) string {
+	return GenOidNoSuffix(indexId, copyNum) + "_0"
 }
 
-// dataId_copyNum_RandInt_RandInt
-func GenOidNoSuffix(dataId, copyNum int) string {
-	return strconv.Itoa(dataId) + "_" +
+// indexId_copyNum_RandInt_RandInt
+func GenOidNoSuffix(indexId, copyNum int) string {
+	return strconv.Itoa(indexId) + "_" +
 		   strconv.Itoa(copyNum) + "_" +
 		   strconv.Itoa(r.Intn(100000)) + "_" +
 		   strconv.Itoa(r.Intn(100000))
 }
 
 
+//
 func GetOidInfo(oid string) OidInfo {
 	arr := strings.Split(oid, "_")
 
@@ -55,7 +56,7 @@ func GetOidInfo(oid string) OidInfo {
 		return info
 	}
 
-	info.DataId, _ = strconv.Atoi(arr[0])
+	info.IndexId, _ = strconv.Atoi(arr[0])
 	info.CopyNum, _ = strconv.Atoi(arr[1])
 	info.Seq, _ = strconv.Atoi(arr[4])
 

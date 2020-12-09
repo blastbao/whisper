@@ -33,12 +33,19 @@ const (
 var need2SyncSlaveCmd []string = []string{CMD_PUT_RECORD, CMD_CHANGE_OID_STATUS}
 
 type PackRecord struct {
+	// 命令字
 	Command string
+	// 请求体
 	Body    []byte // node server to client
+	// Record ID
 	Oid     string // for get or update status
+	// 状态更新
 	Status  int    // for update status
+	// Record
 	Rec     Record // set input / get output
+	// 返回码 成功/失败
 	Flag    bool
+	// 返回信息
 	Msg     string
 }
 
@@ -46,8 +53,8 @@ type PackRecord struct {
 type CenterServerHandlerFn func(p PackRecord) PackRecord
 
 type CenterServerHandler struct {
-	Command string
-	Fn      CenterServerHandlerFn
+	Command string	// 命令字
+	Fn      CenterServerHandlerFn // 函数
 }
 
 // master/slave model, raft is better
@@ -59,8 +66,11 @@ type CenterServer struct {
 	//
 	clientList2OtherCenter     []*gorpc.Client // connect to other center instance
 
+
 	s                          *gorpc.Server
 	mc                         *mediator.NetClient // to mediator
+
+
 	Handlers                   []*CenterServerHandler
 	chPackRecordPutback        chan PackRecord
 	mutexWriteLog4SlaveRecover *sync.Mutex // write log when notify slave to recover failed
@@ -103,11 +113,7 @@ func (cs *CenterServer) handler(clientAddr string, request interface{}) interfac
 		}
 	}
 
-
-	// 如果当前为主节点
-
-
-	//
+	// 如果命令是 "putback-xxx"，则把 p.Record 保存到对应的 Index 中。
 	if strings.HasPrefix(p.Command, CMD_PUTBACK_PREFIX) {
 		return cs.putback(p)
 	}
@@ -116,16 +122,21 @@ func (cs *CenterServer) handler(clientAddr string, request interface{}) interfac
 	var packReturn PackRecord
 	for _, h := range cs.Handlers {
 
+		// 忽略
 		if h.Command != p.Command {
 			continue
 		}
 
+		// 处理
 		packReturn = h.Fn(p)
+
 		common.Log.Debug("center server handler match - " + p.Command)
 		break
 	}
 
 	// slave ok but master not ok
+
+	// 运行至此，意味着 Slaves 都已执行成功，如果 Master 执行失败，则应该放到管道里面。
 	if cs.IsMaster && !packReturn.Flag {
 		cs.chPackRecordPutback <- p
 	}
@@ -140,14 +151,23 @@ func (cs *CenterServer) putback(p PackRecord) PackRecord {
 	r := PackRecord{}
 
 	cmdRaw := p.Command[len(CMD_PUTBACK_PREFIX):]
+
+	// 如果命令是 "PUT_RECORD"
 	if CMD_PUT_RECORD == cmdRaw {
 
-		p.Rec.Status = common.STATUS_RECORD_DEL
+		// 取出 Record
+		record := p.Rec
 
-		oidInfo := GetOidInfo(p.Rec.Oid)
+		// 更新状态为 "Delete"
+		record.Status = common.STATUS_RECORD_DEL
 
-		e := cs.Center.Set(oidInfo.DataId, p.Rec)
+		// 取出 Record 关联信息
+		oidInfo := GetOidInfo(record.Oid)
 
+		// 根据 indexId 查询 index ，然后把 record 保存到 index 中。
+		e := cs.Center.Set(oidInfo.IndexId, record)
+
+		// 构造返回值
 		if e != nil {
 			r.Flag = false
 			r.Msg = e.Error()
@@ -161,10 +181,19 @@ func (cs *CenterServer) putback(p PackRecord) PackRecord {
 
 func (cs *CenterServer) Start(mediatorHost, centerHost string) {
 
-	rec := Record{BlockId: 0}
+	gob.Register(
+		PackRecord{
+			Command: "",
+			Body: []byte{0},
+			Rec: Record{
+				BlockId: 0,
+			},
+			Msg: "",
+			Flag: false,
+		},
+	)
 
-	gob.Register(PackRecord{Command: "", Body: []byte{0}, Rec: rec, Msg: "", Flag: false})
-
+	// 参数检查
 	if cs.Center == nil {
 		common.Log.Info("start center server failed as center is nil")
 		return
@@ -193,17 +222,26 @@ func (cs *CenterServer) Start(mediatorHost, centerHost string) {
 func (cs *CenterServer) putback2Slave() {
 	cs.isRunningPutback = true
 	cs.closeWg.Add(1)
+
 	for {
-		pack, more := <-cs.chPackRecordPutback
-		if more {
+
+		pack, ok := <-cs.chPackRecordPutback
+
+		// 收到有效数据，需要同步给 slaves
+		if ok {
+
 			pack.Command = CMD_PUTBACK_PREFIX + pack.Command
 
 			for _, c := range cs.clientList2OtherCenter {
+
 				resp, e := c.Call(pack)
+
+				// 调用出错，写入执行日志
 				if e != nil {
 					common.Log.Error("center server put back 2 slave error", e, pack)
 					cs.writePutbackLog(pack)
 				} else {
+					// 调用成功，但是执行失败，写入执行日志
 					packReturn := resp.(PackRecord)
 					if !packReturn.Flag {
 						common.Log.Error("center server put back 2 slave fail", packReturn.Msg, pack)
@@ -211,9 +249,12 @@ func (cs *CenterServer) putback2Slave() {
 					}
 				}
 			}
+
+		// 管道已关闭，则应该退出循环，结束协程。
 		} else {
-			cs.closeWg.Done()
 			common.Log.Info("center server put back is stopping")
+			// 退出前更新状态
+			cs.closeWg.Done()
 			cs.isRunningPutback = false
 			break
 		}
@@ -221,40 +262,50 @@ func (cs *CenterServer) putback2Slave() {
 }
 
 func (cs *CenterServer) writePutbackLog(pack PackRecord) error {
+
 	cs.mutexWriteLog4SlaveRecover.Lock()
 	defer cs.mutexWriteLog4SlaveRecover.Unlock()
 
+	// 获取 home 目录下的 "center-server-put-back.log" 文件路径。
 	fn := common.GetUserHomeFile(PUT_BACK_LOG_FILE)
 	bb, e := common.Enc(pack)
 	if e != nil {
 		common.Log.Error("center server put back 2 slave write log error when encode", e, pack)
 		return e
 	}
+
+	// 把 PackRecord 写入到该文件。
 	e = common.Write2File(bb, fn, os.O_APPEND)
 	if e != nil {
 		common.Log.Error("center server put back 2 slave write log error", e, pack)
 	}
+
 	return e
 }
 
 func (cs *CenterServer) Close() {
 
+	// 停止后台协程
 	if cs.isRunningPutback && cs.chPackRecordPutback != nil {
 		close(cs.chPackRecordPutback)
 	}
+
 	cs.closeWg.Wait()
 
+	// 关闭所有的 client
 	for _, c := range cs.clientList2OtherCenter {
 		common.Log.Info("center server client to other closed - " + c.Addr)
 		c.Stop()
 	}
 
+	// 停止 rpc server
 	if cs.s != nil {
 		common.Log.Info("center server closed")
 		cs.s.Stop()
 	}
 }
 
+// 创建 rpc client 并添加到 cs.clientList2OtherCenter 中。
 func (cs *CenterServer) connect2OtherCenter(addr string) {
 	c := gorpc.NewTCPClient(addr)
 	c.Start()

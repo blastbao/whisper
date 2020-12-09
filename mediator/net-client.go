@@ -43,8 +43,8 @@ type NetClient struct {
 	chTrigger   chan Trigger
 }
 
-func (this *NetClient) Start(addr string) error {
-	this.watcherList = []*Watcher{}
+func (nc *NetClient) Start(addr string) error {
+	nc.watcherList = []*Watcher{}
 
 	conn, e := net.Dial("tcp", addr)
 	if e != nil {
@@ -52,53 +52,56 @@ func (this *NetClient) Start(addr string) error {
 	} else {
 		common.Log.Info("net client connected - " + addr)
 	}
-	this.conn = conn
-	this.chTrigger = make(chan Trigger)
 
-	this.addBaseHandler()
+	nc.conn = conn
+	nc.chTrigger = make(chan Trigger)
 
-	go this.handle(conn)
-	go this.handleTrigger()
+	nc.addBaseHandler()
+
+	go nc.handle(conn)
+	go nc.handleTrigger()
 	return nil
 }
 
-func (this *NetClient) Close() error {
-	if this.conn != nil {
+func (nc *NetClient) Close() error {
+	if nc.conn != nil {
 		common.Log.Info("net client is closing")
-		return this.conn.Close()
+		return nc.conn.Close()
 	}
 
-	close(this.chTrigger)
+	close(nc.chTrigger)
 	return nil
 }
 
-func (this *NetClient) AddHandler(cmd string, fn PackProcessFn) {
-	for i, f := range this.handlers {
+func (nc *NetClient) AddHandler(cmd string, fn PackProcessFn) {
+	for i, f := range nc.handlers {
 		if f.Cmd == cmd {
-			this.handlers[i] = CmdClientHandler{Cmd: cmd, Fn: fn}
+			nc.handlers[i] = CmdClientHandler{Cmd: cmd, Fn: fn}
 			break
 		}
 	}
 
-	this.handlers = append(this.handlers, CmdClientHandler{Cmd: cmd, Fn: fn})
+	nc.handlers = append(nc.handlers, CmdClientHandler{Cmd: cmd, Fn: fn})
 	common.Log.Info("net client handler number after add one - " +
-		cmd + " - " + strconv.Itoa(len(this.handlers)))
+		cmd + " - " + strconv.Itoa(len(nc.handlers)))
 }
 
-func (this *NetClient) addBaseHandler() {
-	this.handlers = []CmdClientHandler{}
-	this.AddHandler(CMD_CHECK_ALIVE, func(p Pack) Pack {
+func (nc *NetClient) addBaseHandler() {
+	nc.handlers = []CmdClientHandler{}
+	nc.AddHandler(CMD_CHECK_ALIVE, func(p Pack) Pack {
 		secondsOfClient := strconv.Itoa(int(time.Now().Unix()))
 		return Pack{Command: CMD_REPLY_ALIVE, Body: []byte(secondsOfClient)}
 	})
 }
 
-func (this *NetClient) handleTrigger() {
+func (nc *NetClient) handleTrigger() {
 	for {
-		t := <-this.chTrigger
+		// 监听 trigger 事件
+		t := <-nc.chTrigger
 		common.Log.Debug("net client recieve trigger event", t)
 
-		for _, w := range this.watcherList {
+		// 调用 trigger 事件回调函数
+		for _, w := range nc.watcherList {
 			if w.group == t.group && w.key == t.key && w.status == WatcherStatusOk {
 				common.Log.Info("net client watcher triggered - " + w.group + "," + w.key)
 				w.callback(t.value, t.valueOld)
@@ -107,8 +110,10 @@ func (this *NetClient) handleTrigger() {
 	}
 }
 
-func (this *NetClient) handle(conn net.Conn) {
+func (nc *NetClient) handle(conn net.Conn) {
 	for {
+
+		// 读取数据
 		data := make([]byte, ReadLenOnce)
 		length, e := conn.Read(data)
 		if e != nil {
@@ -121,20 +126,27 @@ func (this *NetClient) handle(conn net.Conn) {
 
 		arr := bytes.Split(body, common.CL)
 		for _, one := range arr {
+
 			// 0 means it's the last one
 			if len(one) == 0 {
 				continue
 			}
 
+			// 解析请求
 			var pack Pack
 			e = common.Dec(one, &pack)
 			if e != nil {
 				common.Log.Error("net client recieve pack error", e)
 			} else {
 				// some special pack handle
-				isNext := this.packPreHandle(pack)
+
+				// 预处理
+				isNext := nc.packPreHandle(pack)
+				// 需要进一步处理
 				if isNext {
-					packReturn := this.process(pack)
+					// 根据 f.Cmd 查找 handler ，然后调用 handler.Fn() 处理 pack 请求。
+					packReturn := nc.process(pack)
+					// 返回响应值
 					if packReturn.Command != CMD_NO_RETURN {
 						r, _ := common.Enc(&packReturn)
 						r = append(r, common.CL...)
@@ -146,8 +158,10 @@ func (this *NetClient) handle(conn net.Conn) {
 	}
 }
 
-func (this *NetClient) process(pack Pack) Pack {
-	for _, f := range this.handlers {
+func (nc *NetClient) process(pack Pack) Pack {
+
+	// 根据 f.Cmd 查找 handler ，然后调用 handler.Fn() 处理 pack 请求。
+	for _, f := range nc.handlers {
 		if f.Cmd == pack.Command {
 			return f.Fn(pack)
 		}
@@ -157,14 +171,19 @@ func (this *NetClient) process(pack Pack) Pack {
 	return PACK_NO_RETURN
 }
 
-func (this *NetClient) packPreHandle(pack Pack) bool {
+// 预处理
+func (nc *NetClient) packPreHandle(pack Pack) bool {
+
+	// server 通知有 watcher 事件发生，写入到 Trigger 管道。
 	if pack.Command == CMD_TRIGGER_WATCHER {
 		var t Trigger
 		DecTri(pack.Body, &t)
+		nc.chTrigger <- t
+		return false // 不需要后续处理
 
-		this.chTrigger <- t
-		return false
+    // 收到 "注册 watcher 成功" 的响应，设置回调函数。
 	} else if pack.Command == CMD_ADD_WATCHER_DONE {
+
 		groupKey := string(pack.Body)
 		common.Log.Info("net client add watch done - " + groupKey)
 
@@ -174,40 +193,42 @@ func (this *NetClient) packPreHandle(pack Pack) bool {
 			return false
 		}
 
-		this.setRegisterWatcher(groupKey)
-		return false
+		nc.setRegisterWatcher(groupKey)
+		return false // 不需要后续处理
 	}
 
 	// continue to execute
-	return true
+	return true // 需要后续处理
 }
 
-func (this *NetClient) Send(pack Pack) error {
+// 发包
+func (nc *NetClient) Send(pack Pack) error {
 	body, e := common.Enc(&pack)
 	if e != nil {
 		return e
 	}
-
-	// add CL
-	body = append(body, common.CL...)
-	_, e = this.conn.Write(body)
+	body = append(body, common.CL...)// add CL
+	_, e = nc.conn.Write(body)
 	return e
 }
 
-func (this *NetClient) WatchInGroup(group, key string, callback WatcherCallback) {
+// 注册 watcher
+func (nc *NetClient) WatchInGroup(group, key string, callback WatcherCallback) {
 	common.Log.Info("net client add watcher - " + group + "," + key)
 
 	w := &Watcher{group: group, key: key, callback: callback}
-	this.watcherList = append(this.watcherList, w)
-	this.Send(Pack{Command: CMD_REGISTER_WATCHER, Body: []byte(group + "," + key)})
+	nc.watcherList = append(nc.watcherList, w)
+	nc.Send(Pack{Command: CMD_REGISTER_WATCHER, Body: []byte(group + "," + key)})
 }
 
-func (this *NetClient) Watch(key string, callback WatcherCallback) {
-	this.WatchInGroup(WatcherGroupAll, key, callback)
+// 注册 watcher
+func (nc *NetClient) Watch(key string, callback WatcherCallback) {
+	nc.WatchInGroup(WatcherGroupAll, key, callback)
 }
 
-func (this *NetClient) setRegisterWatcher(groupKey string) {
-	for _, w := range this.watcherList {
+//
+func (nc *NetClient) setRegisterWatcher(groupKey string) {
+	for _, w := range nc.watcherList {
 		if (w.group + "," + w.key) == groupKey {
 			w.status = WatcherStatusOk
 			common.Log.Info("net client watcher register ok - " + groupKey)

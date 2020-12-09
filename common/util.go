@@ -144,6 +144,7 @@ func GetUserHomeFile(fileName string) string {
 
 // file io utils
 func Write2File(b []byte, fn string, writeType int) error {
+
 	_, error := os.Stat(fn)
 	isExists := error == nil || os.IsExist(error)
 
@@ -161,6 +162,7 @@ func Write2File(b []byte, fn string, writeType int) error {
 		}
 	}
 	defer file.Close()
+
 
 	_, error = file.Write(b)
 	if error != nil {

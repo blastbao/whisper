@@ -5,87 +5,101 @@ import (
 )
 
 func AddHandler2CenterServer(this *CenterServer) {
+
+
+
 	this.Handlers = []*CenterServerHandler{}
 
 	// *** close
-	h := &CenterServerHandler{Command: CMD_CLOSE}
-	h.Fn = func(p PackRecord) PackRecord {
-		this.Close()
-
-		r := PackRecord{}
-		r.Flag = true
-		return r
+	h := &CenterServerHandler{
+		Command: CMD_CLOSE,
+		Fn: func(p PackRecord) PackRecord {
+			// 关闭 CenterServer
+			this.Close()
+			// 构造回包
+			r := PackRecord{}
+			r.Flag = true
+			return r
+		},
 	}
+
 	this.Handlers = append(this.Handlers, h)
-	common.Log.Info("center server handler added - "+h.Command+" and handlers' len is ",
-		len(this.Handlers))
+	common.Log.Info("center server handler added - "+h.Command+" and handlers' len is ", len(this.Handlers))
 
 	// *** put record
-	h = &CenterServerHandler{Command: CMD_PUT_RECORD}
-	h.Fn = func(p PackRecord) PackRecord {
-		r := PackRecord{}
-
-		rec := p.Rec
-		oidInfo := GetOidInfo(rec.Oid)
-		e := this.Center.Set(oidInfo.DataId, rec)
-		if e != nil {
-			r.Flag = false
-			r.Msg = "center set error - " + e.Error()
-		} else {
-			r.Flag = true
-		}
-		return r
-	}
-	this.Handlers = append(this.Handlers, h)
-	common.Log.Info("center server handler added - "+h.Command+" and handlers' len is ",
-		len(this.Handlers))
-
-	// *** get oid meta
-	h = &CenterServerHandler{Command: CMD_GET_OID_META}
-	h.Fn = func(p PackRecord) PackRecord {
-		r := PackRecord{}
-
-		oid := p.Oid
-		oidInfo := GetOidInfo(oid)
-		rec, e := this.Center.Get(oidInfo.DataId, oid)
-		if e != nil {
-			r.Flag = false
-			r.Msg = "center get error - " + e.Error()
-		} else {
-			r.Rec = rec
-			r.Flag = true
-		}
-		return r
-	}
-	this.Handlers = append(this.Handlers, h)
-	common.Log.Info("center server handler added - "+h.Command+" and handlers' len is ",
-		len(this.Handlers))
-
-	// *** change status
-	h = &CenterServerHandler{Command: CMD_CHANGE_OID_STATUS}
-	h.Fn = func(p PackRecord) PackRecord {
-		r := PackRecord{}
-
-		oid := p.Oid
-		oidInfo := GetOidInfo(oid)
-		rec, e := this.Center.Get(oidInfo.DataId, oid)
-		if e != nil {
-			r.Flag = false
-			r.Msg = "center update status disable get error - " + e.Error()
-		} else {
-			rec.Status = p.Status
-			e := this.Center.Set(oidInfo.DataId, rec)
+	h = &CenterServerHandler{
+		Command: CMD_PUT_RECORD,
+		Fn: func(p PackRecord) PackRecord {
+			r := PackRecord{}
+			rec := p.Rec
+			oidInfo := GetOidInfo(rec.Oid)
+			// 根据 indexId 查询 index ，然后把新 record 保存到 index 中。
+			e := this.Center.Set(oidInfo.IndexId, rec)
 			if e != nil {
 				r.Flag = false
-				r.Msg = "center update status disable set error - " + e.Error()
+				r.Msg = "center set error - " + e.Error()
 			} else {
-				// status next process queue TODO
 				r.Flag = true
 			}
-		}
-		return r
+			return r
+		},
+	}
+
+	this.Handlers = append(this.Handlers, h)
+	common.Log.Info("center server handler added - "+h.Command+" and handlers' len is ", len(this.Handlers))
+
+	// *** get oid meta
+	h = &CenterServerHandler{
+		Command: CMD_GET_OID_META,
+		Fn: func(p PackRecord) PackRecord {
+			r := PackRecord{}
+			oid := p.Oid
+			oidInfo := GetOidInfo(oid)
+			// 根据 indexId 查询 index ，然后从 index 中取出 oid 对应的 record 。
+			rec, e := this.Center.Get(oidInfo.IndexId, oid)
+			if e != nil {
+				r.Flag = false
+				r.Msg = "center get error - " + e.Error()
+			} else {
+				// 设置返回值
+				r.Rec = rec
+				r.Flag = true
+			}
+			return r
+		},
+	}
+
+	this.Handlers = append(this.Handlers, h)
+	common.Log.Info("center server handler added - "+h.Command+" and handlers' len is ", len(this.Handlers))
+
+	// *** change status
+	h = &CenterServerHandler{
+		Command: CMD_CHANGE_OID_STATUS,
+		Fn: func(p PackRecord) PackRecord {
+			r := PackRecord{}
+			oid := p.Oid
+			oidInfo := GetOidInfo(oid)
+			// (1) 根据 indexId 查询 index ，然后从 index 中取出 oid 对应的 record 。
+			rec, e := this.Center.Get(oidInfo.IndexId, oid)
+			if e != nil {
+				r.Flag = false
+				r.Msg = "center update status disable get error - " + e.Error()
+			} else {
+				// (2) 更新 record 的 status
+				rec.Status = p.Status
+				// (3) 根据 indexId 查询 index ，然后把新 record 保存到 index 中。
+				e := this.Center.Set(oidInfo.IndexId, rec)
+				if e != nil {
+					r.Flag = false
+					r.Msg = "center update status disable set error - " + e.Error()
+				} else {
+					// status next process queue TODO
+					r.Flag = true
+				}
+			}
+			return r
+		},
 	}
 	this.Handlers = append(this.Handlers, h)
-	common.Log.Info("center server handler added - "+h.Command+" and handlers' len is ",
-		len(this.Handlers))
+	common.Log.Info("center server handler added - "+h.Command+" and handlers' len is ", len(this.Handlers))
 }

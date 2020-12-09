@@ -10,25 +10,30 @@ import (
 	"sync"
 )
 
+
+
+
+// 1 host 10 * 4T / 64M(block size) ~= 625000 blocks
+// 10 hosts ~= 6,500,000 blocks, this is BlockTree length
+
 type Mediator struct {
 	Dir       string
 	BlockTree *b.Tree
 	Server    *NetServer
 	mutex     *sync.Mutex
-	// 1host 10 * 4T / 64M(block size) ~= 625000 blocks
-	// 10 hosts ~= 6,500,000 blocks, this is BlockTree length
 }
 
 func (m *Mediator) Start(host, dir string) {
+
 	m.Dir = dir
 	m.BlockTree = b.TreeNew(common.CmpInt)
 	m.mutex = new(sync.Mutex)
-
 	m.Server = &NetServer{}
+
 	if e := m.Server.Start(host, common.SERVER_PORT_MEDIATOR); e != nil {
 		common.Log.Error("mediator server start error", e)
 	} else {
-
+		common.Log.Info("mediator server start success")
 	}
 }
 

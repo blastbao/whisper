@@ -111,6 +111,7 @@ func (c *Center) GetRecordsByBlockId(blockId int) (RecordList, error) {
 }
 
 func (c *Center) Set(idxId int, rec Record) (err error) {
+	// 根据 indexId 查询 index ，然后把 record 保存到 index 中。
 	for _, d := range c.indexes {
 		if d.Id == idxId {
 			return d.Set(rec)
@@ -121,6 +122,8 @@ func (c *Center) Set(idxId int, rec Record) (err error) {
 }
 
 func (c *Center) Get(idxId int, oid string) (rec Record, err error) {
+
+	// 根据 indexId 查询 index ，然后从 index 中取出 oid 对应的 record 。
 	for _, d := range c.indexes {
 		if d.Id == idxId {
 			return d.Get(oid)

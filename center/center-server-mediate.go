@@ -9,7 +9,6 @@ import (
 func (cs *CenterServer) LetMediate(mediatorHost string) {
 	cs.mc = &mediator.NetClient{}
 
-
 	// new-data
 	cs.mc.AddHandler(
 		CMD_MED_NEW_DATA,
@@ -60,6 +59,8 @@ func (cs *CenterServer) LetMediate(mediatorHost string) {
 	cs.mc.AddHandler(
 		CMD_MED_PERSIST_DATA,
 		func(p mediator.Pack) mediator.Pack {
+
+			// 回包
 			r := mediator.Pack{}
 			r.Command = CMD_MED_PERSIST_DATA
 
@@ -80,27 +81,26 @@ func (cs *CenterServer) LetMediate(mediatorHost string) {
 		CMD_MED_SET_MASTER,
 		func(p mediator.Pack) mediator.Pack {
 
+			// 判断是否为主节点
 			cs.IsMaster = "true" == string(p.Body)
 
-			// true
+			// 主节点
 			if cs.IsMaster {
-
-				//
+				// 如果未在执行 PutBack，需启动协程来处理
 				if !cs.isRunningPutback {
 					cs.chPackRecordPutback = make(chan PackRecord)
 					go cs.putback2Slave()
 					common.Log.Info("center server put back is running")
+				// 如果正在执行 PutBack，无需启动
 				} else {
 					common.Log.Info("center server put back is already running")
 				}
-
-
+			// 从节点
 			} else {
-
+				// 如果正在执行 PutBack ，则关闭 chPackRecordPutback 管道。
 				if cs.isRunningPutback {
 					close(cs.chPackRecordPutback)
 				}
-
 			}
 
 			// 回包
@@ -114,10 +114,11 @@ func (cs *CenterServer) LetMediate(mediatorHost string) {
 	cs.mc.AddHandler(
 		CMD_MED_CONNECT_OTHER_CENTER,
 		func(p mediator.Pack) mediator.Pack {
-
+			// 目标 addr
 			addr := string(p.Body)
+			// 创建 rpc client 并添加到 cs.clientList2OtherCenter 中。
 			cs.connect2OtherCenter(addr)
-
+			// 回包
 			r := mediator.Pack{}
 			r.Command = mediator.CMD_NO_RETURN
 			r.Flag = true
@@ -125,6 +126,7 @@ func (cs *CenterServer) LetMediate(mediatorHost string) {
 		},
 	)
 
+	//
 	if e := cs.mc.Start(mediatorHost + ":" + strconv.Itoa(common.SERVER_PORT_MEDIATOR)); e != nil {
 		common.Log.Error("center server mediator client started failed", e)
 		return
