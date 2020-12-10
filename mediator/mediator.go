@@ -10,8 +10,6 @@ import (
 	"sync"
 )
 
-
-
 // Mediator 主要功能
 //
 // 通知 NodeSvr 连接到哪个 CenterSvr
