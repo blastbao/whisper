@@ -14,37 +14,40 @@ const CONN_TIMEOUT_MILLIS = 20
 // net client using gorpc
 type Connect struct {
 	addr    string
-	c       *gorpc.Client
+	c       *gorpc.Client // node svr connection
 	timeout int
 }
 
-func (this *Connect) Start() {
-	this.c = gorpc.NewTCPClient(this.addr)
-	this.c.Start()
+func (c *Connect) Start() {
+	c.c = gorpc.NewTCPClient(c.addr)
+	c.c.Start()
 
-	common.Log.Info("client to node server connected", this.addr)
+	common.Log.Info("client to node server connected", c.addr)
 }
 
-func (this *Connect) Close() {
-	if this.c != nil {
-		this.c.Stop()
-		common.Log.Info("client to node server disconnected", this.addr)
+func (c *Connect) Close() {
+	if c.c != nil {
+		c.c.Stop()
+		common.Log.Info("client to node server disconnected", c.addr)
 	}
 }
 
-func (this *Connect) Upload(oid string, body []byte, mime int, ch chan bool) {
+
+// 上传 Record 到 nodeSvr
+func (c *Connect) Upload(oid string, body []byte, mime int, ch chan bool) {
+
+	// 构造上传请求
 	pack := center.PackRecord{}
 	pack.Command = agent.AGENT_SERVER_COMMAND_SAVE
-
 	pack.Body = body
 	pack.Rec = center.Record{Oid: oid, Mime: mime}
 
 	var error error
 	var resp interface{}
-	if this.timeout != 0 {
-		resp, error = this.c.CallTimeout(pack, time.Duration(this.timeout)*time.Millisecond)
+	if c.timeout != 0 {
+		resp, error = c.c.CallTimeout(pack, time.Duration(c.timeout)*time.Millisecond)
 	} else {
-		resp, error = this.c.Call(pack)
+		resp, error = c.c.Call(pack)
 	}
 
 	if error != nil {
@@ -73,12 +76,13 @@ func (this *Connect) Upload(oid string, body []byte, mime int, ch chan bool) {
 	}
 }
 
-func (this *Connect) Download(rec center.Record) (body []byte, err error) {
+// 从 nodeSvr 下载 Record
+func (c *Connect) Download(rec center.Record) (body []byte, err error) {
 	pack := center.PackRecord{}
 	pack.Command = agent.AGENT_SERVER_COMMAND_GET
 	pack.Rec = rec
 
-	resp, e := this.c.Call(pack)
+	resp, e := c.c.Call(pack)
 	if e != nil {
 		common.Log.Error("client download error", rec, e)
 		err = e

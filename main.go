@@ -58,38 +58,57 @@ func closeClient(httpHost string) {
 }
 
 func main() {
+	// 配置文件
 	configFile := flag.String("configFile", "", "config file path")
+	// 命令
 	command := flag.String("command", "", "command(close or ...)")
+	// 是否需要关闭
 	isCloseCommand := "close" == *command
+	//
 	isMediatorControl := "mediatorControl" == *command
 
 	if *configFile != "" {
 		common.ConfFilePath = *configFile
 	}
+
+	// 读取配置文件
 	c := common.GetConf()
 
+
+	// Mediator
 	if common.ROLE_MEDIATOR == c.Role {
+
+		// 关闭 Mediator
 		if isCloseCommand {
 			closeMediator(c.MediatorHost)
 			return
+		// 发送 Notify
 		} else if isMediatorControl {
 			controlMediator(c.MediatorHost, c.MediatorControlBodyFile)
 			return
 		}
 
+		// 其它 Command ，则启动 Mediator ，监听在 LOCALHOST:SERVER_PORT_MEDIATOR 地址上，数据目录为 c.BaseDir 。
 		m := &mediator.Mediator{}
 		m.Start(common.LOCALHOST, c.BaseDir)
+
+		// 从 c.BaseDir 加载 m.BlockTree 索引。
 		if e := m.Load(); e != nil {
 			common.Log.Error("mediator load block error", e)
 			return
 		}
+
+	// Center
 	} else if common.ROLE_CENTER == c.Role {
+
+		// 关闭 Center Svr
 		if isCloseCommand {
 			rpcHost := flag.String("rpcHost", "", "rpc host")
 			closeCenter(*rpcHost)
 			return
 		}
 
+		// 创建 Center ，并从 c.BaseDir 加载 oid => record 的索引。
 		cc := &center.Center{}
 		e := cc.Load(c.BaseDir)
 		if e != nil {
@@ -97,27 +116,37 @@ func main() {
 			return
 		}
 
+		// 启动 CenterServer，监听在 LOCALHOST:SERVER_PORT_CENTER 地址上
 		s := &center.CenterServer{}
 		s.Center = cc
 		center.AddHandler2CenterServer(s)
 		s.Start(c.MediatorHost, common.LOCALHOST)
+
+
+	// Agent
 	} else if common.ROLE_AGENT == c.Role {
+
+		// 关闭 Agent
 		if isCloseCommand {
 			rpcHost := flag.String("rpcHost", "", "rpc host")
 			closeAgent(*rpcHost)
 			return
 		}
 
-		// node server start
+		// 启动 node server
 		s := &agent.NodeServer{}
 		s.Start(c.MediatorHost, common.LOCALHOST)
+
+	// Client
 	} else if common.ROLE_CLIENT == c.Role {
+
 		if isCloseCommand {
 			httpHost := flag.String("httpHost", "", "http host")
 			closeClient(*httpHost)
 			return
 		}
 
+		// 创建 Client ，建立同 mediator server 建立长连接
 		cl := &client.Client{}
 		cl.Start(c.MediatorHost)
 	} else {

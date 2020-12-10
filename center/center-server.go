@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	PUT_BACK_LOG_FILE     = "center-server-put-back.log"
-	CMD_CLOSE             = "close"
-	CMD_PUTBACK_PREFIX    = "putback-"
-	CMD_PUT_RECORD        = "save-rec"
+	PUT_BACK_LOG_FILE  = "center-server-put-back.log"
+	CMD_CLOSE          = "close"
+	CMD_PUTBACK_PREFIX = "putback-"
+	CMD_PUT_RECORD     = "save-rec"
 
 	CMD_GET_OID_META      = "get-oid-meta"
 	CMD_CHANGE_OID_STATUS = "change-oid-status"
@@ -24,9 +24,9 @@ const (
 	// command from mediator server
 	CMD_MED_CONNECT_OTHER_CENTER = "connect-2-other-center"
 	CMD_MED_SET_MASTER           = "set-master"
-	CMD_MED_NEW_DATA             = "new-data"
-	CMD_MED_PERSIST_DATA         = "persist-data"
-	CMD_MED_DATA_INFO            = "data-info"
+	CMD_MED_NEW_INDEX            = "new-data"
+	CMD_MED_PERSIST_INDEX        = "persist-data"
+	CMD_MED_INDEX_INFO           = "data-info"
 )
 
 // TODO, add other command if need slaves to keep the same
@@ -36,40 +36,40 @@ type PackRecord struct {
 	// 命令字
 	Command string
 	// 请求体
-	Body    []byte // node server to client
+	Body []byte // node server to client
 	// Record ID
-	Oid     string // for get or update status
+	Oid string // for get or update status
 	// 状态更新
-	Status  int    // for update status
+	Status int // for update status
 	// Record
-	Rec     Record // set input / get output
+	Rec Record // set input / get output
 	// 返回码 成功/失败
-	Flag    bool
+	Flag bool
 	// 返回信息
-	Msg     string
+	Msg string
 }
 
 // command dispatch
 type CenterServerHandlerFn func(p PackRecord) PackRecord
 
 type CenterServerHandler struct {
-	Command string	// 命令字
+	Command string                // 命令字
 	Fn      CenterServerHandlerFn // 函数
 }
 
 // master/slave model, raft is better
 type CenterServer struct {
-	IsMaster                   bool
-	Center                     *Center
-	CenterHost                 string
+	IsMaster bool
 
-	//
-	clientList2OtherCenter     []*gorpc.Client // connect to other center instance
+	// 存储了一组索引对象
+	Center     *Center
+	CenterHost string
 
+	// 同其它 Center Svr 的连接，如果本节点为 master 则其它截节点为 slave 。
+	clientList2OtherCenter []*gorpc.Client // connect to other center instance
 
-	s                          *gorpc.Server
-	mc                         *mediator.NetClient // to mediator
-
+	s  *gorpc.Server      // 服务对象
+	mc *mediator.NetClient // to mediator
 
 	Handlers                   []*CenterServerHandler
 	chPackRecordPutback        chan PackRecord
@@ -129,7 +129,6 @@ func (cs *CenterServer) handler(clientAddr string, request interface{}) interfac
 
 		// 处理
 		packReturn = h.Fn(p)
-
 		common.Log.Debug("center server handler match - " + p.Command)
 		break
 	}
@@ -184,11 +183,11 @@ func (cs *CenterServer) Start(mediatorHost, centerHost string) {
 	gob.Register(
 		PackRecord{
 			Command: "",
-			Body: []byte{0},
+			Body:    []byte{0},
 			Rec: Record{
 				BlockId: 0,
 			},
-			Msg: "",
+			Msg:  "",
 			Flag: false,
 		},
 	)
@@ -202,13 +201,14 @@ func (cs *CenterServer) Start(mediatorHost, centerHost string) {
 	cs.mutexWriteLog4SlaveRecover = new(sync.Mutex)
 
 	// if not including port, add default
+	// 设置 CenterSvr 服务监听地址
 	addr := centerHost
 	if !strings.Contains(addr, ":") {
 		addr = addr + ":" + strconv.Itoa(common.SERVER_PORT_CENTER)
 	}
-
 	cs.CenterHost = addr
 
+	// 启动 CenterSvr 服务
 	cs.s = gorpc.NewTCPServer(addr, cs.handler)
 	if e := cs.s.Start(); e != nil {
 		common.Log.Error("center server started failed", e)
@@ -216,6 +216,7 @@ func (cs *CenterServer) Start(mediatorHost, centerHost string) {
 		common.Log.Info("center server started - " + addr)
 	}
 
+	// 同 Mediator 建立长连接，当接收到 Mediator 的请求时，会执行相应的 Handler 。
 	cs.LetMediate(mediatorHost)
 }
 
@@ -250,7 +251,7 @@ func (cs *CenterServer) putback2Slave() {
 				}
 			}
 
-		// 管道已关闭，则应该退出循环，结束协程。
+			// 管道已关闭，则应该退出循环，结束协程。
 		} else {
 			common.Log.Info("center server put back is stopping")
 			// 退出前更新状态

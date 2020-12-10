@@ -4,9 +4,17 @@ import (
 	"github.com/blastbao/whisper/common"
 )
 
+
+
+
+// 为 CenterServer 添加 Handlers ，用于处理接收到的请求。
+//
+// CMD_CLOSE: 关闭 CenterServer
+// CMD_PUT_RECORD: 根据 indexId 查询 index ，然后把新 record 保存到 index 中。
+// CMD_GET_OID_META: 根据 indexId 查询 index ，然后从 index 中取出 oid 对应的 record 。
+// CMD_CHANGE_OID_STATUS: 根据 indexId 查询 index ，然后更新其中 record 的 status。
+//
 func AddHandler2CenterServer(this *CenterServer) {
-
-
 
 	this.Handlers = []*CenterServerHandler{}
 

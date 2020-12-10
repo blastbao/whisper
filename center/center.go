@@ -16,13 +16,12 @@ import (
 
 // provide index read write service
 type Center struct {
-
 	// suppose 100, memory cost 100 * 200M(100w records each data) = 20G
 	indexes []*Index
 	mutex   *sync.Mutex
-
 }
 
+// 加载索引
 func (c *Center) Load(dir string) error {
 	common.Log.Info("center load index data from " + dir)
 

@@ -21,14 +21,20 @@ const (
 
 
 type BlockInServer struct {
+	// 匿名包含
 	mediator.Block
+
 	mutex     *sync.Mutex // write lock
 	isWriting bool
 }
 
+
+// dir/block_{id}
 func (bs *BlockInServer) GetFilePath() string {
 	return bs.Dir + "/" + BLOCK_FILE_NAME_PRE + strconv.Itoa(bs.BlockId)
 }
+
+
 
 // store/read files from disk
 type Node struct {
@@ -38,13 +44,20 @@ type Node struct {
 	Status string
 }
 
+
+
 // get one block to store, dir(mounted disk) should be different 4 copies
 func (n *Node) getFitBlock(oid string, len int, beginLoop int) *BlockInServer {
+
+
 	if beginLoop > GET_BLOCK_MAX_LOOP_TIMES {
 		return nil
 	}
+
 	needLoopAgain := false
 	for e := n.Blocks.Front(); e != nil; e = e.Next() {
+
+
 		block := e.Value.(*BlockInServer)
 		left := block.Size - block.End
 		if left < len {
@@ -78,16 +91,19 @@ func (n *Node) getBlock(blockId int) (b *BlockInServer, err error) {
 }
 
 func (n *Node) Get(rec center.Record) (b []byte, err error) {
+
+
+	// 查找块信息
 	block, error := n.getBlock(rec.BlockId)
 	if error != nil {
 		err = error
 		return
 	}
 
+	// 打开块文件
 	fn := block.GetFilePath()
 	_, error = os.Stat(fn)
 	isExists := error == nil || os.IsExist(error)
-
 	if !isExists {
 		err = errors.New("node get error as block file not found")
 		return
@@ -100,6 +116,8 @@ func (n *Node) Get(rec center.Record) (b []byte, err error) {
 	}
 	defer file.Close()
 
+	// 从 rec.Offset 开始读取 rec.Len 字节的数据
+
 	// read fully one time?
 	bb := make([]byte, rec.Len)
 	_, error = file.ReadAt(bb, int64(rec.Offset))
@@ -108,17 +126,23 @@ func (n *Node) Get(rec center.Record) (b []byte, err error) {
 		return
 	}
 
+	// 返回已读数据
 	return bb, nil
 }
 
 func (n *Node) SaveLocal(oid string, b []byte) (rec center.Record, err error) {
-	var len int = len(b)
+
+	// 数据长度
+	len := len(b)
+
+	//
 	block := n.getFitBlock(oid, len, 0)
 	if block == nil {
 		err = errors.New("node save error as no block space left")
 		return
 	}
 
+	// 设置正在写入状态
 	block.isWriting = true
 	block.mutex.Lock()
 	defer func() {
@@ -126,28 +150,33 @@ func (n *Node) SaveLocal(oid string, b []byte) (rec center.Record, err error) {
 		block.isWriting = false
 	}()
 
+	// 获取块数据文件地址
 	fn := block.GetFilePath()
 	_, error := os.Stat(fn)
 	isExists := error == nil || os.IsExist(error)
 
+	// 不存在则创建
 	if !isExists {
 		file, error := os.Create(fn)
 		if error != nil {
 			err = error
 			return
 		}
+		// 写入数据
 		_, error = file.WriteAt(b, 0)
 		if error != nil {
 			err = error
 			return
 		}
 		defer file.Close()
+	// 存在则打开
 	} else {
 		file, error := os.OpenFile(fn, os.O_WRONLY, 0666)
 		if error != nil {
 			err = error
 			return
 		}
+		// 写入数据到指定偏移量
 		_, error = file.WriteAt(b, int64(block.End))
 		if error != nil {
 			err = error
@@ -156,8 +185,16 @@ func (n *Node) SaveLocal(oid string, b []byte) (rec center.Record, err error) {
 		defer file.Close()
 	}
 
-	rec = center.Record{BlockId: block.BlockId, Md5: common.GenMd5(b), Offset: block.End, Len: len}
+	// 构造 Record 存储信息
+	rec = center.Record{
+		BlockId: block.BlockId,	// 归属的块
+		Md5: common.GenMd5(b),	// 校验码
+		Offset: block.End,		// 块偏移
+		Len: len,				// 块大小
+	}
+
 	// change end position
+	// 更新偏移量
 	block.End += len
 
 	return
@@ -187,6 +224,7 @@ func (n *Node) UnlockBlock(blockId int) {
 }
 
 func (n *Node) ReadFull(blockId int) (b []byte, err error) {
+
 	block, e := n.getBlock(blockId)
 	if e != nil {
 		err = e

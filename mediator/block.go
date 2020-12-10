@@ -5,6 +5,8 @@ package mediator
 
 
 // blocks' information help save file and keep load balance 4 node server
+//
+// 块信息有助于保存文件和保持负载平衡。
 type Block struct {
 	BlockId int
 	DataId  int    // all this block's records save in one center data

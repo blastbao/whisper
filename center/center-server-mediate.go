@@ -6,16 +6,26 @@ import (
 	"strconv"
 )
 
+
+// Center 同 Mediator 建立长连接，当接收到 Mediator 的请求时，会执行下面的 Handler 。
+//
+// CMD_MED_NEW_INDEX: 创建新的 Index 对象
+// CMD_MED_INDEX_INFO: 遍历所有 c.indexes ，取出所含数据条数
+// CMD_MED_PERSIST_INDEX:  将 c.indexes 索引持久化到索引文件
+// CMD_MED_SET_MASTER:
+// CMD_MED_CONNECT_OTHER_CENTER: 创建 rpc client 并添加到 cs.clientList2OtherCenter 中。
+//
+//
 func (cs *CenterServer) LetMediate(mediatorHost string) {
 	cs.mc = &mediator.NetClient{}
 
-	// new-data
+	// new-index
 	cs.mc.AddHandler(
-		CMD_MED_NEW_DATA,
+		CMD_MED_NEW_INDEX,
 		func(p mediator.Pack) mediator.Pack {
 			// 回包
 			r := mediator.Pack{}
-			r.Command = CMD_MED_NEW_DATA
+			r.Command = CMD_MED_NEW_INDEX
 			dir := string(p.Body)
 			// 创建新的 Index 对象
 			newIndexId, e := cs.Center.NewIndex(dir)
@@ -32,12 +42,12 @@ func (cs *CenterServer) LetMediate(mediatorHost string) {
 	)
 
 	cs.mc.AddHandler(
-		CMD_MED_DATA_INFO,
+		CMD_MED_INDEX_INFO,
 		func(p mediator.Pack) mediator.Pack {
 
 			// 回包
 			r := mediator.Pack{}
-			r.Command = CMD_MED_DATA_INFO
+			r.Command = CMD_MED_INDEX_INFO
 
 			// 遍历所有 indexes ，取出所含数据条数
 			m := cs.Center.RecordCounts()
@@ -57,12 +67,12 @@ func (cs *CenterServer) LetMediate(mediatorHost string) {
 	)
 
 	cs.mc.AddHandler(
-		CMD_MED_PERSIST_DATA,
+		CMD_MED_PERSIST_INDEX,
 		func(p mediator.Pack) mediator.Pack {
 
 			// 回包
 			r := mediator.Pack{}
-			r.Command = CMD_MED_PERSIST_DATA
+			r.Command = CMD_MED_PERSIST_INDEX
 
 			// 将内存索引持久化到索引文件
 			e := cs.Center.Persist()
@@ -126,11 +136,12 @@ func (cs *CenterServer) LetMediate(mediatorHost string) {
 		},
 	)
 
-	//
 	if e := cs.mc.Start(mediatorHost + ":" + strconv.Itoa(common.SERVER_PORT_MEDIATOR)); e != nil {
+		// 如果启动失败，打印日志后退出。
 		common.Log.Error("center server mediator client started failed", e)
 		return
 	} else {
+		// 如果启动成功，把本地地址和 CenterHost 映射关系知会到 mediator 。
 		common.Log.Info("center server mediator client started")
 		cs.mc.Send(mediator.Pack{Command: mediator.CMD_MAPPING_HOST, Body: []byte(cs.CenterHost)})
 	}

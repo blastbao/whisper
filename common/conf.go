@@ -78,6 +78,7 @@ func GetConf() *Conf {
 }
 
 func GetProperties(fn string) (r map[string]string, err error) {
+
 	r = make(map[string]string)
 
 	bb, e := ioutil.ReadFile(fn)

@@ -12,6 +12,21 @@ import (
 
 
 
+// Mediator 主要功能
+//
+// 通知 NodeSvr 连接到哪个 CenterSvr
+// 通知 NodeSvr 当前有哪些块(副本)列表
+//
+// 通知 Client 连接到哪个 CenterSvr
+// 通知 Client 连接到哪些 NodeSvr
+// 通知 Client 当前有哪些块(副本)列表
+// 通知 Client 刷新客户端配置，主要有路由策略、副本数、IndexId
+//
+// 通知 CenterSvr 创建 Index
+// 请求 CenterSvr 获取所有 Index 及数据量
+// 通知 CenterSvr 持久化 Index
+// 通知 CenterSvr 转换角色为 Master 节点
+// 通知 CenterSvr 连接到其它 Master 节点
 
 // 1 host 10 * 4T / 64M(block size) ~= 625000 blocks
 // 10 hosts ~= 6,500,000 blocks, this is BlockTree length
@@ -30,6 +45,7 @@ func (m *Mediator) Start(host, dir string) {
 	m.mutex = new(sync.Mutex)
 	m.Server = &NetServer{}
 
+	// 启动 Mediator Server 。
 	if e := m.Server.Start(host, common.SERVER_PORT_MEDIATOR); e != nil {
 		common.Log.Error("mediator server start error", e)
 	} else {
@@ -48,6 +64,7 @@ func (m *Mediator) getPersistFile() string {
 }
 
 // write to file
+// 持久化
 func (m *Mediator) Persist() (err error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -99,6 +116,7 @@ func (m *Mediator) Persist() (err error) {
 	return nil
 }
 
+// 重加载
 func (m *Mediator) Load() (err error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -117,7 +135,6 @@ func (m *Mediator) Load() (err error) {
 
 		var block Block
 		common.Dec(b, &block)
-
 		m.BlockTree.Set(block.BlockId, block)
 	}
 
@@ -125,12 +142,16 @@ func (m *Mediator) Load() (err error) {
 	return nil
 }
 
+
+// 创建 Block
 func (m *Mediator) NewBlock(dataId int, addr string, dir string, size int) (blockId int, err error) {
+
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	blockIdMax := 0
 	if m.BlockTree.Len() != 0 {
+
 		en, e := m.BlockTree.SeekFirst()
 		if e != nil {
 			err = e
@@ -157,7 +178,14 @@ func (m *Mediator) NewBlock(dataId int, addr string, dir string, size int) (bloc
 
 	newBlockId := blockIdMax + 1
 
-	block := Block{BlockId: newBlockId, DataId: dataId, Addr: addr, Dir: dir, Size: size}
+	block := Block{
+		BlockId: newBlockId,
+		DataId: dataId,
+		Addr: addr,
+		Dir: dir,
+		Size: size,
+	}
+
 	m.BlockTree.Set(newBlockId, block)
 
 	return newBlockId, nil

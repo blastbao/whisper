@@ -46,6 +46,7 @@ type NetClient struct {
 func (nc *NetClient) Start(addr string) error {
 	nc.watcherList = []*Watcher{}
 
+	// 建立通过 mediator 的 tcp 长连接
 	conn, e := net.Dial("tcp", addr)
 	if e != nil {
 		return e
@@ -58,7 +59,9 @@ func (nc *NetClient) Start(addr string) error {
 
 	nc.addBaseHandler()
 
+	// 处理 mediator serve 推送的请求
 	go nc.handle(conn)
+	// 监听 mediator serve 推送的 trigger 事件，并调用对应回调函数
 	go nc.handleTrigger()
 	return nil
 }
@@ -82,16 +85,19 @@ func (nc *NetClient) AddHandler(cmd string, fn PackProcessFn) {
 	}
 
 	nc.handlers = append(nc.handlers, CmdClientHandler{Cmd: cmd, Fn: fn})
-	common.Log.Info("net client handler number after add one - " +
-		cmd + " - " + strconv.Itoa(len(nc.handlers)))
+	common.Log.Info("net client handler number after add one - " + cmd + " - " + strconv.Itoa(len(nc.handlers)))
 }
 
 func (nc *NetClient) addBaseHandler() {
 	nc.handlers = []CmdClientHandler{}
-	nc.AddHandler(CMD_CHECK_ALIVE, func(p Pack) Pack {
-		secondsOfClient := strconv.Itoa(int(time.Now().Unix()))
-		return Pack{Command: CMD_REPLY_ALIVE, Body: []byte(secondsOfClient)}
-	})
+	// mediator 会定时检查连接是否活跃，此时回复 mediator 本连接还活跃。
+	nc.AddHandler(
+		CMD_CHECK_ALIVE,
+		func(p Pack) Pack {
+			secondsOfClient := strconv.Itoa(int(time.Now().Unix()))
+			return Pack{Command: CMD_REPLY_ALIVE, Body: []byte(secondsOfClient)}
+		},
+	)
 }
 
 func (nc *NetClient) handleTrigger() {
@@ -110,6 +116,8 @@ func (nc *NetClient) handleTrigger() {
 	}
 }
 
+
+// 不断从长连接 conn 中读取 mediator server 发来的请求并处理。
 func (nc *NetClient) handle(conn net.Conn) {
 	for {
 
@@ -159,14 +167,12 @@ func (nc *NetClient) handle(conn net.Conn) {
 }
 
 func (nc *NetClient) process(pack Pack) Pack {
-
 	// 根据 f.Cmd 查找 handler ，然后调用 handler.Fn() 处理 pack 请求。
 	for _, f := range nc.handlers {
 		if f.Cmd == pack.Command {
 			return f.Fn(pack)
 		}
 	}
-
 	common.Log.Warning("net client found no handler for", pack.Command)
 	return PACK_NO_RETURN
 }
@@ -215,9 +221,10 @@ func (nc *NetClient) Send(pack Pack) error {
 // 注册 watcher
 func (nc *NetClient) WatchInGroup(group, key string, callback WatcherCallback) {
 	common.Log.Info("net client add watcher - " + group + "," + key)
-
-	w := &Watcher{group: group, key: key, callback: callback}
+	// 先把 watcher 添加到本地列表中，等收到 server 回复后，修改状态为 "WatcherStatusOk" 从而可以进行回调处理。
+	w := &Watcher{ group: group, key: key, callback: callback }
 	nc.watcherList = append(nc.watcherList, w)
+	// 调用 server 接口，注册 watcher 。
 	nc.Send(Pack{Command: CMD_REGISTER_WATCHER, Body: []byte(group + "," + key)})
 }
 
@@ -226,7 +233,7 @@ func (nc *NetClient) Watch(key string, callback WatcherCallback) {
 	nc.WatchInGroup(WatcherGroupAll, key, callback)
 }
 
-//
+// 等收到 server 回复后，修改状态为 "WatcherStatusOk" 从而可以进行回调处理。
 func (nc *NetClient) setRegisterWatcher(groupKey string) {
 	for _, w := range nc.watcherList {
 		if (w.group + "," + w.key) == groupKey {

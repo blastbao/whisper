@@ -127,6 +127,7 @@ func (ns *NetServer) Close() error {
 	return nil
 }
 
+// 断开连接
 func (ns *NetServer) disconnect(conn net.Conn) {
 	for i, c := range ns.cc {
 		// 查找目标连接
@@ -202,11 +203,9 @@ func (ns *NetServer) addBaseHandler() {
 	// register client watcher
 	// 长连接客户端注册新 watcher ，当 {group, key} 上有变更时，会通知它们。
 	ns.AddHandler(
-
 		// 添加 Watcher
 		CMD_REGISTER_WATCHER,
 		func(p Pack, conn net.Conn) Pack {
-
 			// 请求解析
 			groupKey := string(p.Body)
 			common.Log.Warning("net server register watcher doing", groupKey)
